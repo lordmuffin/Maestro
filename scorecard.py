@@ -27,10 +27,17 @@ def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description='LLM Comparison Scorecard')
     parser.add_argument(
+        '--mode',
+        type=str,
+        choices=['model', 'prompt'],
+        default='model',
+        help='Evaluation mode: "model" for Model-vs-Model, "prompt" for Prompt-vs-Prompt (default: model)'
+    )
+    parser.add_argument(
         '--num-prompts',
         type=int,
         default=int(os.getenv('NUM_PROMPTS', '1')),
-        help='Number of prompts to generate per task type (default: 1)'
+        help='Number of prompts to generate per task type (default: 1). Only applies in model mode.'
     )
     parser.add_argument(
         '--runs-per-prompt',
@@ -38,7 +45,44 @@ def parse_arguments():
         default=int(os.getenv('RUNS_PER_PROMPT', '1')),
         help='Number of times to run each prompt (default: 1)'
     )
-    return parser.parse_args()
+
+    # Prompt-vs-Prompt mode arguments
+    parser.add_argument(
+        '--model',
+        type=str,
+        choices=['gemini', 'claude'],
+        help='Model to test in Prompt-vs-Prompt mode (required when --mode=prompt)'
+    )
+    parser.add_argument(
+        '--prompt-a',
+        type=str,
+        help='First prompt to test in Prompt-vs-Prompt mode (required when --mode=prompt)'
+    )
+    parser.add_argument(
+        '--prompt-b',
+        type=str,
+        help='Second prompt to test in Prompt-vs-Prompt mode (required when --mode=prompt)'
+    )
+    parser.add_argument(
+        '--criteria',
+        type=str,
+        choices=['general', 'code'],
+        default='general',
+        help='Criteria set to use in Prompt-vs-Prompt mode (default: general)'
+    )
+
+    args = parser.parse_args()
+
+    # Validate prompt mode requirements
+    if args.mode == 'prompt':
+        if not args.model:
+            parser.error("--model is required when --mode=prompt")
+        if not args.prompt_a:
+            parser.error("--prompt-a is required when --mode=prompt")
+        if not args.prompt_b:
+            parser.error("--prompt-b is required when --mode=prompt")
+
+    return args
 
 
 CONFIG = parse_arguments()
@@ -399,6 +443,141 @@ def calculate_weighted_average(scores: Dict[str, float], criteria: List[ScoringC
     return total_weighted_score / total_weight if total_weight > 0 else 0.0
 
 
+def generate_prompt_comparison_report(eval_results: Dict) -> str:
+    """
+    Generate a comprehensive Markdown report comparing two prompts on the same model.
+    Includes statistical analysis if multiple runs were performed.
+    """
+    lines = []
+
+    # Extract data
+    model = eval_results["model"]
+    criteria = eval_results["criteria"]
+    criteria_type = eval_results["criteria_type"]
+    prompts = eval_results["prompts"]
+    aggregated = eval_results["aggregated"]
+    config = eval_results["config"]
+
+    # Header
+    lines.append("# Prompt Comparison Report")
+    lines.append("")
+    lines.append(f"**Model Tested:** {model}")
+    lines.append(f"**Criteria Set:** {criteria_type}")
+    lines.append(f"**Configuration:** {config['runs_per_prompt']} runs per prompt")
+    lines.append("")
+
+    # Prompts Section
+    lines.append("## Prompts Tested")
+    lines.append("")
+    lines.append("### Prompt A (Control)")
+    lines.append(f"> {prompts['Prompt A']}")
+    lines.append("")
+    lines.append("### Prompt B (Challenger)")
+    lines.append(f"> {prompts['Prompt B']}")
+    lines.append("")
+
+    # Results Table
+    lines.append("## Evaluation Results")
+    lines.append("")
+    lines.append("| Criterion | Weight | Prompt A | Prompt B | Difference |")
+    lines.append("|-----------|--------|----------|----------|------------|")
+
+    prompt_a_scores = aggregated.get("Prompt A", {})
+    prompt_b_scores = aggregated.get("Prompt B", {})
+
+    for criterion in criteria:
+        score_a = prompt_a_scores.get(criterion.name, 0)
+        score_b = prompt_b_scores.get(criterion.name, 0)
+        diff = score_b - score_a
+        diff_str = f"{diff:+.2f}"
+        lines.append(f"| {criterion.name} | {criterion.weight:.1f} | {score_a:.2f} | {score_b:.2f} | {diff_str} |")
+
+    # Calculate weighted averages
+    avg_a = calculate_weighted_average(prompt_a_scores, criteria)
+    avg_b = calculate_weighted_average(prompt_b_scores, criteria)
+    diff_avg = avg_b - avg_a
+    diff_avg_str = f"{diff_avg:+.2f}"
+
+    lines.append(f"| **Weighted Average** | - | **{avg_a:.2f}** | **{avg_b:.2f}** | **{diff_avg_str}** |")
+    lines.append("")
+
+    # Statistical Analysis (if multiple runs)
+    if config['runs_per_prompt'] > 1:
+        lines.append("## Statistical Analysis")
+        lines.append("")
+        lines.append("*Statistics across multiple runs*")
+        lines.append("")
+
+        detailed = eval_results["detailed"]
+
+        for prompt_label in ["Prompt A", "Prompt B"]:
+            lines.append(f"### {prompt_label}")
+            lines.append("")
+
+            runs = detailed[prompt_label]
+            if runs:
+                _, stats = aggregate_scores(runs)
+
+                lines.append("| Criterion | Mean | Std Dev | Min | Max | 95% CI |")
+                lines.append("|-----------|------|---------|-----|-----|--------|")
+
+                for criterion in criteria:
+                    if criterion.name in stats:
+                        s = stats[criterion.name]
+                        ci_str = f"[{s['ci_lower']:.2f}, {s['ci_upper']:.2f}]"
+                        lines.append(f"| {criterion.name} | {s['mean']:.2f} | {s['std_dev']:.2f} | {s['min']:.2f} | {s['max']:.2f} | {ci_str} |")
+
+                lines.append("")
+
+    # Summary
+    lines.append("## Summary")
+    lines.append("")
+
+    if avg_b > avg_a:
+        winner = "Prompt B"
+        margin = avg_b - avg_a
+        lines.append(f"**Winner: Prompt B** (margin: +{margin:.2f} points)")
+        lines.append("")
+        lines.append(f"Prompt B achieved a weighted average score of **{avg_b:.2f}**, outperforming Prompt A's score of {avg_a:.2f}.")
+        lines.append("")
+
+        # Highlight areas of improvement
+        improvements = []
+        for criterion in criteria:
+            score_a = prompt_a_scores.get(criterion.name, 0)
+            score_b = prompt_b_scores.get(criterion.name, 0)
+            if score_b > score_a:
+                diff = score_b - score_a
+                improvements.append(f"- **{criterion.name}**: +{diff:.2f} ({score_a:.2f} → {score_b:.2f})")
+
+        if improvements:
+            lines.append("**Key Improvements:**")
+            lines.extend(improvements)
+
+    elif avg_a > avg_b:
+        winner = "Prompt A"
+        margin = avg_a - avg_b
+        lines.append(f"**Winner: Prompt A** (margin: +{margin:.2f} points)")
+        lines.append("")
+        lines.append(f"Prompt A (control) achieved a weighted average score of **{avg_a:.2f}**, outperforming Prompt B's score of {avg_b:.2f}.")
+        lines.append("")
+        lines.append("**Recommendation:** The original prompt (Prompt A) performs better. Consider revising Prompt B's approach.")
+    else:
+        lines.append("**Result: Tie**")
+        lines.append("")
+        lines.append(f"Both prompts achieved identical weighted average scores of **{avg_a:.2f}**.")
+
+    lines.append("")
+
+    # Recommendation section
+    if config['runs_per_prompt'] == 1:
+        lines.append("---")
+        lines.append("")
+        lines.append("*Note: This evaluation was based on a single run per prompt. For more robust results, consider running with `--runs-per-prompt 5` or higher to account for variability.*")
+
+    return "\n".join(lines)
+
+
 def generate_comparison_report(eval_results: Dict = None) -> str:
     """
     Generate a comprehensive Markdown report comparing Gemini and Claude.
@@ -578,6 +757,96 @@ def generate_comparison_report(eval_results: Dict = None) -> str:
     return "\n".join(lines)
 
 
+async def run_prompt_evaluation() -> Dict:
+    """
+    Run Prompt-vs-Prompt evaluation: compare two prompts on the same model.
+    Returns a nested dictionary with all results and statistics.
+    """
+    model_name = CONFIG.model
+    prompt_a = CONFIG.prompt_a
+    prompt_b = CONFIG.prompt_b
+    runs_per_prompt = CONFIG.runs_per_prompt
+    criteria_type = CONFIG.criteria
+
+    # Select criteria and model API function
+    criteria = GENERAL_CRITERIA if criteria_type == 'general' else CODE_CRITERIA
+    task_type = TaskType.GENERAL if criteria_type == 'general' else TaskType.CODE
+
+    # Select the API function based on model choice
+    if model_name == 'gemini':
+        api_function = call_gemini_api
+        display_model_name = "Gemini"
+    else:
+        api_function = call_claude_api
+        display_model_name = "Claude"
+
+    print(f"Running Prompt-vs-Prompt evaluation...")
+    print(f"Model: {display_model_name}")
+    print(f"Criteria: {criteria_type}")
+    print(f"Runs per prompt: {runs_per_prompt}")
+    print()
+
+    # Results structure: {prompt_label: [run1_scores, run2_scores, ...]}
+    detailed_results = {
+        "Prompt A": [],
+        "Prompt B": []
+    }
+
+    prompts = {
+        "Prompt A": prompt_a,
+        "Prompt B": prompt_b
+    }
+
+    # Evaluate both prompts
+    for prompt_label, prompt_text in prompts.items():
+        print(f"[{prompt_label}]")
+        print(f"  Text: {prompt_text[:80]}...")
+        print()
+
+        # Run multiple times
+        for run_idx in range(runs_per_prompt):
+            if runs_per_prompt > 1:
+                print(f"    Run {run_idx + 1}/{runs_per_prompt}...")
+
+            # Call the API
+            response, response_time = await api_function(prompt_text, f"{prompt_label}-R{run_idx+1}")
+
+            # Score the response
+            scores, score_time = await score_response_with_llm(
+                prompt_text, response, task_type, criteria, f"{display_model_name}-{prompt_label}-R{run_idx+1}"
+            )
+
+            # Store results
+            detailed_results[prompt_label].append(scores)
+
+            if runs_per_prompt > 1:
+                print(f"      [OK] Completed run {run_idx + 1}")
+
+        print()
+
+    # Calculate aggregated scores
+    aggregated_scores = {}
+    for prompt_label in ["Prompt A", "Prompt B"]:
+        if detailed_results[prompt_label]:
+            mean_scores, _ = aggregate_scores(detailed_results[prompt_label])
+            aggregated_scores[prompt_label] = mean_scores
+
+    # Return results in a structure compatible with report generation
+    return {
+        "aggregated": aggregated_scores,
+        "detailed": detailed_results,
+        "prompts": prompts,
+        "model": display_model_name,
+        "criteria": criteria,
+        "criteria_type": criteria_type,
+        "config": {
+            "mode": "prompt",
+            "model": display_model_name,
+            "runs_per_prompt": runs_per_prompt
+        }
+    }
+
+
 async def run_evaluation() -> Dict:
     """
     Run the actual evaluation by calling both APIs and scoring responses.
@@ -652,7 +921,7 @@ async def run_evaluation() -> Dict:
                 detailed_results["Claude"][task_type][prompt_idx].append(claude_scores)
 
                 if runs_per_prompt > 1:
-                    print(f"      ✓ Completed run {run_idx + 1}")
+                    print(f"      [OK] Completed run {run_idx + 1}")
 
         print()
 
@@ -784,8 +1053,11 @@ async def async_main():
     """
     Async main execution function.
     """
+    mode = CONFIG.mode
+    title = "LLM PROMPT COMPARISON SCORECARD" if mode == 'prompt' else "LLM MODEL COMPARISON SCORECARD"
+
     print("=" * 80)
-    print("LLM MODEL COMPARISON SCORECARD")
+    print(title)
     print("=" * 80)
     print()
 
@@ -794,7 +1066,13 @@ async def async_main():
         global TEST_SCORES
         global EVAL_RESULTS
         overall_start = time.time()
-        EVAL_RESULTS = await run_evaluation()
+
+        # Route to appropriate evaluation function
+        if mode == 'prompt':
+            EVAL_RESULTS = await run_prompt_evaluation()
+        else:
+            EVAL_RESULTS = await run_evaluation()
+
         TIMING.overall_time = time.time() - overall_start
 
         # Extract aggregated scores for backward compatibility
@@ -810,7 +1088,11 @@ async def async_main():
         print()
 
         # Generate and display the comparison report (with detailed stats if available)
-        comparison_report = generate_comparison_report(EVAL_RESULTS)
+        if mode == 'prompt':
+            comparison_report = generate_prompt_comparison_report(EVAL_RESULTS)
+        else:
+            comparison_report = generate_comparison_report(EVAL_RESULTS)
+
         print(comparison_report)
         print()
 
