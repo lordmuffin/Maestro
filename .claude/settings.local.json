@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python scorecard.py:*)"
+      "Bash(python scorecard.py:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

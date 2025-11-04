@@ -46,13 +46,30 @@ def parse_arguments():
         help='Number of times to run each prompt (default: 1)'
     )
 
-    # Prompt-vs-Prompt mode arguments
+    # Model selection arguments
+    parser.add_argument(
+        '--model1',
+        type=str,
+        help='First model for Model-vs-Model mode. Accepts model keys (e.g., claude-haiku, gemini-2.5-flash) or provider shortcuts (claude, gemini). Defaults to claude.'
+    )
+    parser.add_argument(
+        '--model2',
+        type=str,
+        help='Second model for Model-vs-Model mode. Accepts model keys or provider shortcuts. Defaults to gemini.'
+    )
     parser.add_argument(
         '--model',
         type=str,
-        choices=['gemini', 'claude'],
-        help='Model to test in Prompt-vs-Prompt mode (required when --mode=prompt)'
+        help='Model for Prompt-vs-Prompt mode. Accepts model keys or provider shortcuts (required when --mode=prompt).'
     )
+    parser.add_argument(
+        '--judge-model',
+        type=str,
+        default='claude-sonnet-4.5',
+        help='Model to use as judge for scoring (default: claude-sonnet-4.5). Accepts model keys or provider shortcuts.'
+    )
+
+    # Prompt-vs-Prompt mode arguments
     parser.add_argument(
         '--prompt-a',
         type=str,
@@ -72,6 +89,13 @@ def parse_arguments():
     )
 
     args = parser.parse_args()
+
+    # Set defaults for model-vs-model mode
+    if args.mode == 'model':
+        if not args.model1:
+            args.model1 = 'claude'
+        if not args.model2:
+            args.model2 = 'gemini'
 
     # Validate prompt mode requirements
     if args.mode == 'prompt':
@@ -112,6 +136,56 @@ class ScoringCriteria:
     weight: float
 
 
+@dataclass
+class ModelConfig:
+    """Configuration for an LLM model."""
+    provider: str  # 'claude' or 'gemini'
+    model_id: str  # Full model identifier (e.g., 'claude-sonnet-4-5-20250929')
+    display_name: str  # Human-readable name (e.g., 'Claude Sonnet 4.5')
+    max_tokens: int = 4096
+
+
+# Define available models
+AVAILABLE_MODELS = {
+    'claude-sonnet-4.5': ModelConfig(
+        provider='claude',
+        model_id='claude-sonnet-4-5-20250929',
+        display_name='Claude Sonnet 4.5',
+        max_tokens=4096
+    ),
+    'claude-haiku': ModelConfig(
+        provider='claude',
+        model_id='claude-haiku-20250305',
+        display_name='Claude Haiku',
+        max_tokens=4096
+    ),
+    'claude-opus': ModelConfig(
+        provider='claude',
+        model_id='claude-opus-4-5-20250514',
+        display_name='Claude Opus',
+        max_tokens=4096
+    ),
+    'gemini-2.5-pro': ModelConfig(
+        provider='gemini',
+        model_id='gemini-2.5-pro',
+        display_name='Gemini 2.5 Pro',
+        max_tokens=4096
+    ),
+    'gemini-2.5-flash': ModelConfig(
+        provider='gemini',
+        model_id='gemini-2.5-flash',
+        display_name='Gemini 2.5 Flash',
+        max_tokens=4096
+    ),
+}
+
+# Default models for provider shortcuts
+DEFAULT_MODELS = {
+    'claude': 'claude-sonnet-4.5',
+    'gemini': 'gemini-2.5-pro',
+}
+
+
 # Define scoring criteria for different task types
 GENERAL_CRITERIA = [
     ScoringCriteria("Accuracy", 1.0),
@@ -138,12 +212,7 @@ TEST_PROMPTS = {
 }
 
 
-# API Configuration
-CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
-GEMINI_MODEL = "gemini-2.5-pro"
-
-
-async def call_gemini_api(prompt: str, task_name: str) -> Tuple[str, float]:
+async def call_gemini_api(prompt: str, task_name: str, model_config: ModelConfig) -> Tuple[str, float]:
     """
     Call Gemini API with the given prompt.
     Returns a tuple of (response text, execution time in seconds).
@@ -153,7 +222,7 @@ async def call_gemini_api(prompt: str, task_name: str) -> Tuple[str, float]:
         raise ValueError("GOOGLE_API_KEY not found in environment variables")
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(GEMINI_MODEL)
+    model = genai.GenerativeModel(model_config.model_id)
 
     start_time = time.time()
     # Google API doesn't have native async support, so we run it in an executor
@@ -161,12 +230,12 @@ async def call_gemini_api(prompt: str, task_name: str) -> Tuple[str, float]:
     elapsed_time = time.time() - start_time
 
     # Store timing
-    TIMING.api_calls[f"Gemini - {task_name}"] = elapsed_time
+    TIMING.api_calls[f"{model_config.display_name} - {task_name}"] = elapsed_time
 
     return response.text, elapsed_time
 
 
-async def call_claude_api(prompt: str, task_name: str) -> Tuple[str, float]:
+async def call_claude_api(prompt: str, task_name: str, model_config: ModelConfig) -> Tuple[str, float]:
     """
     Call Claude API with the given prompt.
     Returns a tuple of (response text, execution time in seconds).
@@ -179,8 +248,8 @@ async def call_claude_api(prompt: str, task_name: str) -> Tuple[str, float]:
 
     start_time = time.time()
     message = await client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=4096,
+        model=model_config.model_id,
+        max_tokens=model_config.max_tokens,
         messages=[
             {"role": "user", "content": prompt}
         ]
@@ -188,12 +257,12 @@ async def call_claude_api(prompt: str, task_name: str) -> Tuple[str, float]:
     elapsed_time = time.time() - start_time
 
     # Store timing
-    TIMING.api_calls[f"Claude - {task_name}"] = elapsed_time
+    TIMING.api_calls[f"{model_config.display_name} - {task_name}"] = elapsed_time
 
     return message.content[0].text, elapsed_time
 
 
-async def score_response_with_llm(prompt: str, response: str, task_type: TaskType, criteria: List[ScoringCriteria], model_name: str) -> Tuple[Dict[str, float], float]:
+async def score_response_with_llm(prompt: str, response: str, task_type: TaskType, criteria: List[ScoringCriteria], model_name: str, judge_model_config: ModelConfig) -> Tuple[Dict[str, float], float]:
     """
     Use Claude as a judge to score a response based on the given criteria.
     Returns a tuple of (scores dictionary, execution time in seconds).
@@ -236,7 +305,7 @@ Provide ONLY the JSON object, no additional text."""
 
     start_time = time.time()
     message = await client.messages.create(
-        model="claude-sonnet-4-5-20250929",
+        model=judge_model_config.model_id,
         max_tokens=1024,
         messages=[
             {"role": "user", "content": judge_prompt}
@@ -260,6 +329,34 @@ Provide ONLY the JSON object, no additional text."""
 
     scores = json.loads(response_text)
     return scores, elapsed_time
+
+
+def resolve_model(model_identifier: str) -> ModelConfig:
+    """
+    Resolve a model identifier to a ModelConfig.
+    Accepts either a full model key (e.g., 'claude-haiku') or a provider shortcut (e.g., 'claude').
+
+    Args:
+        model_identifier: Either a model key from AVAILABLE_MODELS or a provider shortcut from DEFAULT_MODELS
+
+    Returns:
+        ModelConfig for the specified model
+
+    Raises:
+        ValueError: If the model identifier is not recognized
+    """
+    # First check if it's a direct model key
+    if model_identifier in AVAILABLE_MODELS:
+        return AVAILABLE_MODELS[model_identifier]
+
+    # Check if it's a provider shortcut
+    if model_identifier in DEFAULT_MODELS:
+        default_model_key = DEFAULT_MODELS[model_identifier]
+        return AVAILABLE_MODELS[default_model_key]
+
+    # Not found
+    available_keys = sorted(list(AVAILABLE_MODELS.keys()) + list(DEFAULT_MODELS.keys()))
+    raise ValueError(f"Unknown model identifier '{model_identifier}'. Available options: {', '.join(available_keys)}")
 
 
 async def generate_test_prompts(num_prompts: int, task_type: TaskType) -> List[str]:
@@ -580,15 +677,24 @@ def generate_prompt_comparison_report(eval_results: Dict) -> str:
 
 def generate_comparison_report(eval_results: Dict = None) -> str:
     """
-    Generate a comprehensive Markdown report comparing Gemini and Claude.
+    Generate a comprehensive Markdown report comparing two models.
     Includes statistical analysis if eval_results with multiple runs is provided.
     """
     lines = []
 
+    # Get model names from eval_results
+    if eval_results and "models" in eval_results:
+        model1_name = eval_results["models"]["model1"].display_name
+        model2_name = eval_results["models"]["model2"].display_name
+    else:
+        # Fallback for backwards compatibility
+        model1_name = "Model 1"
+        model2_name = "Model 2"
+
     # Header
     lines.append("# LLM Model Comparison Report")
     lines.append("")
-    lines.append("**Models Evaluated:** Gemini vs Claude")
+    lines.append(f"**Models Evaluated:** {model1_name} vs {model2_name}")
     lines.append("")
 
     # Configuration info
@@ -596,6 +702,9 @@ def generate_comparison_report(eval_results: Dict = None) -> str:
         config = eval_results["config"]
         lines.append(f"**Configuration:** {config['num_prompts']} prompts per task type, {config['runs_per_prompt']} runs per prompt")
         lines.append("")
+        if "models" in eval_results:
+            lines.append(f"**Judge Model:** {eval_results['models']['judge'].display_name}")
+            lines.append("")
 
     # Test Prompts Section
     lines.append("## Test Prompts")
@@ -630,47 +739,47 @@ def generate_comparison_report(eval_results: Dict = None) -> str:
     # General Task Results
     lines.append("## General Task Results")
     lines.append("")
-    lines.append("| Criterion | Weight | Gemini | Claude |")
+    lines.append(f"| Criterion | Weight | {model1_name} | {model2_name} |")
     lines.append("|-----------|--------|--------|--------|")
 
     for criterion in GENERAL_CRITERIA:
-        gemini_score = TEST_SCORES["Gemini"][TaskType.GENERAL].get(criterion.name, 0)
-        claude_score = TEST_SCORES["Claude"][TaskType.GENERAL].get(criterion.name, 0)
-        lines.append(f"| {criterion.name} | {criterion.weight:.1f} | {gemini_score:.1f} | {claude_score:.1f} |")
+        model1_score = TEST_SCORES[model1_name][TaskType.GENERAL].get(criterion.name, 0)
+        model2_score = TEST_SCORES[model2_name][TaskType.GENERAL].get(criterion.name, 0)
+        lines.append(f"| {criterion.name} | {criterion.weight:.1f} | {model1_score:.1f} | {model2_score:.1f} |")
 
-    gemini_general_avg = calculate_weighted_average(
-        TEST_SCORES["Gemini"][TaskType.GENERAL],
+    model1_general_avg = calculate_weighted_average(
+        TEST_SCORES[model1_name][TaskType.GENERAL],
         GENERAL_CRITERIA
     )
-    claude_general_avg = calculate_weighted_average(
-        TEST_SCORES["Claude"][TaskType.GENERAL],
+    model2_general_avg = calculate_weighted_average(
+        TEST_SCORES[model2_name][TaskType.GENERAL],
         GENERAL_CRITERIA
     )
 
-    lines.append(f"| **Average** | - | **{gemini_general_avg:.2f}** | **{claude_general_avg:.2f}** |")
+    lines.append(f"| **Average** | - | **{model1_general_avg:.2f}** | **{model2_general_avg:.2f}** |")
     lines.append("")
 
     # Code Task Results
     lines.append("## Code Task Results")
     lines.append("")
-    lines.append("| Criterion | Weight | Gemini | Claude |")
+    lines.append(f"| Criterion | Weight | {model1_name} | {model2_name} |")
     lines.append("|-----------|--------|--------|--------|")
 
     for criterion in CODE_CRITERIA:
-        gemini_score = TEST_SCORES["Gemini"][TaskType.CODE].get(criterion.name, 0)
-        claude_score = TEST_SCORES["Claude"][TaskType.CODE].get(criterion.name, 0)
-        lines.append(f"| {criterion.name} | {criterion.weight:.1f} | {gemini_score:.1f} | {claude_score:.1f} |")
+        model1_score = TEST_SCORES[model1_name][TaskType.CODE].get(criterion.name, 0)
+        model2_score = TEST_SCORES[model2_name][TaskType.CODE].get(criterion.name, 0)
+        lines.append(f"| {criterion.name} | {criterion.weight:.1f} | {model1_score:.1f} | {model2_score:.1f} |")
 
-    gemini_code_avg = calculate_weighted_average(
-        TEST_SCORES["Gemini"][TaskType.CODE],
+    model1_code_avg = calculate_weighted_average(
+        TEST_SCORES[model1_name][TaskType.CODE],
         CODE_CRITERIA
     )
-    claude_code_avg = calculate_weighted_average(
-        TEST_SCORES["Claude"][TaskType.CODE],
+    model2_code_avg = calculate_weighted_average(
+        TEST_SCORES[model2_name][TaskType.CODE],
         CODE_CRITERIA
     )
 
-    lines.append(f"| **Weighted Average** | - | **{gemini_code_avg:.2f}** | **{claude_code_avg:.2f}** |")
+    lines.append(f"| **Weighted Average** | - | **{model1_code_avg:.2f}** | **{model2_code_avg:.2f}** |")
     lines.append("")
 
     # Overall Summary
@@ -679,11 +788,11 @@ def generate_comparison_report(eval_results: Dict = None) -> str:
     lines.append("| Model | General Tasks | Code Tasks | Overall Average |")
     lines.append("|-------|---------------|------------|-----------------|")
 
-    gemini_overall = (gemini_general_avg + gemini_code_avg) / 2
-    claude_overall = (claude_general_avg + claude_code_avg) / 2
+    model1_overall = (model1_general_avg + model1_code_avg) / 2
+    model2_overall = (model2_general_avg + model2_code_avg) / 2
 
-    lines.append(f"| **Gemini** | {gemini_general_avg:.2f} | {gemini_code_avg:.2f} | {gemini_overall:.2f} |")
-    lines.append(f"| **Claude** | {claude_general_avg:.2f} | {claude_code_avg:.2f} | {claude_overall:.2f} |")
+    lines.append(f"| **{model1_name}** | {model1_general_avg:.2f} | {model1_code_avg:.2f} | {model1_overall:.2f} |")
+    lines.append(f"| **{model2_name}** | {model2_general_avg:.2f} | {model2_code_avg:.2f} | {model2_overall:.2f} |")
     lines.append("")
 
     # Statistical Analysis (if multiple runs)
@@ -701,14 +810,15 @@ def generate_comparison_report(eval_results: Dict = None) -> str:
             lines.append(f"### {task_name} Task Statistics")
             lines.append("")
 
-            for model in ["Gemini", "Claude"]:
-                lines.append(f"**{model}:**")
+            for model_name in [model1_name, model2_name]:
+                lines.append(f"**{model_name}:**")
                 lines.append("")
 
                 # Aggregate all runs across all prompts for this task/model
                 all_runs = []
-                for prompt_idx in detailed[model][task_type]:
-                    all_runs.extend(detailed[model][task_type][prompt_idx])
+                if model_name in detailed and task_type in detailed[model_name]:
+                    for prompt_idx in detailed[model_name][task_type]:
+                        all_runs.extend(detailed[model_name][task_type][prompt_idx])
 
                 if all_runs:
                     _, stats = aggregate_scores(all_runs)
@@ -730,12 +840,12 @@ def generate_comparison_report(eval_results: Dict = None) -> str:
     lines.append("## Conclusion")
     lines.append("")
 
-    if gemini_overall > claude_overall:
-        winner = "Gemini"
-        margin = gemini_overall - claude_overall
-    elif claude_overall > gemini_overall:
-        winner = "Claude"
-        margin = claude_overall - gemini_overall
+    if model1_overall > model2_overall:
+        winner = model1_name
+        margin = model1_overall - model2_overall
+    elif model2_overall > model1_overall:
+        winner = model2_name
+        margin = model2_overall - model1_overall
     else:
         winner = "Tie"
         margin = 0.0
@@ -745,14 +855,16 @@ def generate_comparison_report(eval_results: Dict = None) -> str:
     else:
         lines.append(f"**Winner: {winner}** (margin: +{margin:.2f} points)")
         lines.append("")
-        if winner == "Gemini":
-            lines.append(f"- Gemini excelled in General tasks: {gemini_general_avg:.2f} vs {claude_general_avg:.2f}")
-            if claude_code_avg > gemini_code_avg:
-                lines.append(f"- Claude performed better in Code tasks: {claude_code_avg:.2f} vs {gemini_code_avg:.2f}")
+        if winner == model1_name:
+            if model1_general_avg > model2_general_avg:
+                lines.append(f"- {model1_name} excelled in General tasks: {model1_general_avg:.2f} vs {model2_general_avg:.2f}")
+            if model2_code_avg > model1_code_avg:
+                lines.append(f"- {model2_name} performed better in Code tasks: {model2_code_avg:.2f} vs {model1_code_avg:.2f}")
         else:
-            lines.append(f"- Claude excelled in Code tasks: {claude_code_avg:.2f} vs {gemini_code_avg:.2f}")
-            if gemini_general_avg > claude_general_avg:
-                lines.append(f"- Gemini performed better in General tasks: {gemini_general_avg:.2f} vs {claude_general_avg:.2f}")     
+            if model2_general_avg > model1_general_avg:
+                lines.append(f"- {model2_name} excelled in General tasks: {model2_general_avg:.2f} vs {model1_general_avg:.2f}")
+            if model1_code_avg > model2_code_avg:
+                lines.append(f"- {model1_name} performed better in Code tasks: {model1_code_avg:.2f} vs {model2_code_avg:.2f}")     
 
     return "\n".join(lines)
 
@@ -762,26 +874,30 @@ async def run_prompt_evaluation() -> Dict:
     Run Prompt-vs-Prompt evaluation: compare two prompts on the same model.
     Returns a nested dictionary with all results and statistics.
     """
-    model_name = CONFIG.model
     prompt_a = CONFIG.prompt_a
     prompt_b = CONFIG.prompt_b
     runs_per_prompt = CONFIG.runs_per_prompt
     criteria_type = CONFIG.criteria
 
-    # Select criteria and model API function
+    # Resolve models
+    model_config = resolve_model(CONFIG.model)
+    judge_model_config = resolve_model(CONFIG.judge_model)
+
+    # Select criteria and determine API function
     criteria = GENERAL_CRITERIA if criteria_type == 'general' else CODE_CRITERIA
     task_type = TaskType.GENERAL if criteria_type == 'general' else TaskType.CODE
 
-    # Select the API function based on model choice
-    if model_name == 'gemini':
+    # Select the API function based on provider
+    if model_config.provider == 'gemini':
         api_function = call_gemini_api
-        display_model_name = "Gemini"
-    else:
+    elif model_config.provider == 'claude':
         api_function = call_claude_api
-        display_model_name = "Claude"
+    else:
+        raise ValueError(f"Unknown provider: {model_config.provider}")
 
     print(f"Running Prompt-vs-Prompt evaluation...")
-    print(f"Model: {display_model_name}")
+    print(f"Model: {model_config.display_name}")
+    print(f"Judge: {judge_model_config.display_name}")
     print(f"Criteria: {criteria_type}")
     print(f"Runs per prompt: {runs_per_prompt}")
     print()
@@ -809,11 +925,11 @@ async def run_prompt_evaluation() -> Dict:
                 print(f"    Run {run_idx + 1}/{runs_per_prompt}...")
 
             # Call the API
-            response, response_time = await api_function(prompt_text, f"{prompt_label}-R{run_idx+1}")
+            response, response_time = await api_function(prompt_text, f"{prompt_label}-R{run_idx+1}", model_config)
 
             # Score the response
             scores, score_time = await score_response_with_llm(
-                prompt_text, response, task_type, criteria, f"{display_model_name}-{prompt_label}-R{run_idx+1}"
+                prompt_text, response, task_type, criteria, f"{model_config.display_name}-{prompt_label}-R{run_idx+1}", judge_model_config
             )
 
             # Store results
@@ -836,12 +952,14 @@ async def run_prompt_evaluation() -> Dict:
         "aggregated": aggregated_scores,
         "detailed": detailed_results,
         "prompts": prompts,
-        "model": display_model_name,
+        "model": model_config.display_name,
+        "model_config": model_config,
+        "judge_config": judge_model_config,
         "criteria": criteria,
         "criteria_type": criteria_type,
         "config": {
             "mode": "prompt",
-            "model": display_model_name,
+            "model": model_config.display_name,
             "runs_per_prompt": runs_per_prompt
         }
     }
@@ -856,7 +974,17 @@ async def run_evaluation() -> Dict:
     num_prompts = CONFIG.num_prompts
     runs_per_prompt = CONFIG.runs_per_prompt
 
+    # Resolve models
+    model1_config = resolve_model(CONFIG.model1)
+    model2_config = resolve_model(CONFIG.model2)
+    judge_model_config = resolve_model(CONFIG.judge_model)
+
+    model1_name = model1_config.display_name
+    model2_name = model2_config.display_name
+
     print(f"Running LLM evaluations...")
+    print(f"Models: {model1_name} vs {model2_name}")
+    print(f"Judge: {judge_model_config.display_name}")
     print(f"Configuration: {num_prompts} prompts per task type, {runs_per_prompt} runs per prompt")
     print()
 
@@ -865,9 +993,21 @@ async def run_evaluation() -> Dict:
 
     # Results structure: {model: {task_type: {prompt_idx: [run1_scores, run2_scores, ...]}}}
     detailed_results = {
-        "Gemini": {TaskType.GENERAL: {}, TaskType.CODE: {}},
-        "Claude": {TaskType.GENERAL: {}, TaskType.CODE: {}}
+        model1_name: {TaskType.GENERAL: {}, TaskType.CODE: {}},
+        model2_name: {TaskType.GENERAL: {}, TaskType.CODE: {}}
     }
+
+    # Determine which API function to use for each model
+    def get_api_function(model_config: ModelConfig):
+        if model_config.provider == 'gemini':
+            return call_gemini_api
+        elif model_config.provider == 'claude':
+            return call_claude_api
+        else:
+            raise ValueError(f"Unknown provider: {model_config.provider}")
+
+    model1_api = get_api_function(model1_config)
+    model2_api = get_api_function(model2_config)
 
     # Generate or use default prompts
     for task_type in [TaskType.GENERAL, TaskType.CODE]:
@@ -888,8 +1028,8 @@ async def run_evaluation() -> Dict:
             print(f"\n  Prompt {prompt_idx + 1}/{len(prompts)}: {prompt[:80]}...")
 
             # Initialize storage for this prompt
-            for model in ["Gemini", "Claude"]:
-                detailed_results[model][task_type][prompt_idx] = []
+            for model_name in [model1_name, model2_name]:
+                detailed_results[model_name][task_type][prompt_idx] = []
 
             # Run multiple times
             for run_idx in range(runs_per_prompt):
@@ -898,27 +1038,27 @@ async def run_evaluation() -> Dict:
 
                 # Call both APIs in parallel
                 api_tasks = [
-                    call_gemini_api(prompt, f"{task_name}-P{prompt_idx+1}-R{run_idx+1}"),
-                    call_claude_api(prompt, f"{task_name}-P{prompt_idx+1}-R{run_idx+1}")
+                    model1_api(prompt, f"{task_name}-P{prompt_idx+1}-R{run_idx+1}", model1_config),
+                    model2_api(prompt, f"{task_name}-P{prompt_idx+1}-R{run_idx+1}", model2_config)
                 ]
 
                 results = await asyncio.gather(*api_tasks)
-                gemini_response, gemini_time = results[0]
-                claude_response, claude_time = results[1]
+                model1_response, model1_time = results[0]
+                model2_response, model2_time = results[1]
 
                 # Score both responses in parallel
                 scoring_tasks = [
-                    score_response_with_llm(prompt, gemini_response, task_type, criteria, f"Gemini-P{prompt_idx+1}-R{run_idx+1}"),
-                    score_response_with_llm(prompt, claude_response, task_type, criteria, f"Claude-P{prompt_idx+1}-R{run_idx+1}")
+                    score_response_with_llm(prompt, model1_response, task_type, criteria, f"{model1_name}-P{prompt_idx+1}-R{run_idx+1}", judge_model_config),
+                    score_response_with_llm(prompt, model2_response, task_type, criteria, f"{model2_name}-P{prompt_idx+1}-R{run_idx+1}", judge_model_config)
                 ]
 
                 scoring_results = await asyncio.gather(*scoring_tasks)
-                gemini_scores, gemini_score_time = scoring_results[0]
-                claude_scores, claude_score_time = scoring_results[1]
+                model1_scores, model1_score_time = scoring_results[0]
+                model2_scores, model2_score_time = scoring_results[1]
 
                 # Store results
-                detailed_results["Gemini"][task_type][prompt_idx].append(gemini_scores)
-                detailed_results["Claude"][task_type][prompt_idx].append(claude_scores)
+                detailed_results[model1_name][task_type][prompt_idx].append(model1_scores)
+                detailed_results[model2_name][task_type][prompt_idx].append(model2_scores)
 
                 if runs_per_prompt > 1:
                     print(f"      [OK] Completed run {run_idx + 1}")
@@ -927,26 +1067,31 @@ async def run_evaluation() -> Dict:
 
     # Calculate aggregated scores for compatibility with existing code
     aggregated_scores = {
-        "Gemini": {TaskType.GENERAL: {}, TaskType.CODE: {}},
-        "Claude": {TaskType.GENERAL: {}, TaskType.CODE: {}}
+        model1_name: {TaskType.GENERAL: {}, TaskType.CODE: {}},
+        model2_name: {TaskType.GENERAL: {}, TaskType.CODE: {}}
     }
 
-    for model in ["Gemini", "Claude"]:
+    for model_name in [model1_name, model2_name]:
         for task_type in [TaskType.GENERAL, TaskType.CODE]:
             # Collect all scores across all prompts and runs
             all_runs = []
-            for prompt_idx in detailed_results[model][task_type]:
-                all_runs.extend(detailed_results[model][task_type][prompt_idx])
+            for prompt_idx in detailed_results[model_name][task_type]:
+                all_runs.extend(detailed_results[model_name][task_type][prompt_idx])
 
             if all_runs:
                 mean_scores, _ = aggregate_scores(all_runs)
-                aggregated_scores[model][task_type] = mean_scores
+                aggregated_scores[model_name][task_type] = mean_scores
 
     # Return both detailed and aggregated results
     return {
         "aggregated": aggregated_scores,
         "detailed": detailed_results,
         "prompts": all_prompts,
+        "models": {
+            "model1": model1_config,
+            "model2": model2_config,
+            "judge": judge_model_config
+        },
         "config": {
             "num_prompts": num_prompts,
             "runs_per_prompt": runs_per_prompt
@@ -1006,7 +1151,7 @@ def generate_timing_report() -> str:
     return "\n".join(lines)
 
 
-def save_report(timing_report: str, comparison_report: str) -> str:
+def save_report(timing_report: str, comparison_report: str, eval_results: Dict = None) -> str:
     """
     Save the combined report to a timestamped markdown file in the reports directory.
     Returns the path to the saved file.
@@ -1027,7 +1172,17 @@ def save_report(timing_report: str, comparison_report: str) -> str:
     lines.append("# LLM Comparison Scorecard Report")
     lines.append("")
     lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(f"**Models:** {GEMINI_MODEL} vs {CLAUDE_MODEL}")
+
+    # Add model information if available
+    if eval_results and "models" in eval_results:
+        model1 = eval_results["models"]["model1"]
+        model2 = eval_results["models"]["model2"]
+        lines.append(f"**Models:** {model1.display_name} ({model1.model_id}) vs {model2.display_name} ({model2.model_id})")
+    elif eval_results and "model_config" in eval_results:
+        # Prompt-vs-Prompt mode
+        model = eval_results["model_config"]
+        lines.append(f"**Model:** {model.display_name} ({model.model_id})")
+
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -1097,7 +1252,7 @@ async def async_main():
         print()
 
         # Save report to file
-        filepath = save_report(timing_report, comparison_report)
+        filepath = save_report(timing_report, comparison_report, EVAL_RESULTS)
         print("=" * 80)
         print(f"REPORT SAVED: {filepath}")
         print("=" * 80)
