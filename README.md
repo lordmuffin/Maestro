@@ -4,6 +4,7 @@ A comprehensive evaluation framework for comparing LLM models and prompts using 
 
 ## Features
 
+### Core Features
 - **Two Evaluation Modes:**
   - **Model-vs-Model (MvM)**: Compare different LLM models (Gemini vs Claude)
   - **Prompt-vs-Prompt (PvP)**: Compare different prompts on the same model
@@ -13,18 +14,53 @@ A comprehensive evaluation framework for comparing LLM models and prompts using 
 - **Parallel Execution**: Efficient async API calls for faster evaluations
 - **Comprehensive Reports**: Markdown reports with timing analysis and detailed statistics
 
+### 🆕 Enhanced Features (Week 1-2)
+- **Golden Test Suite**: 10 validated test cases with human scores for baseline measurement
+- **Agreement Metrics**: Judge-human agreement tracking (correlation, MAE, Cohen's kappa)
+- **KPI Dashboard**: Comprehensive performance indicators with targets
+- **Sensitivity Testing**: Robustness testing across prompt variations
+- **Evaluation Pipeline**: Automated end-to-end evaluation workflow
+- **Trend Tracking**: Historical analysis and improvement monitoring
+- **Enhanced Criteria**: Refined scoring focused on accuracy, quality, and efficiency
+
+> 📖 **See [IMPLEMENTATION.md](IMPLEMENTATION.md) for complete documentation of enhanced features**
+
 ## Installation
 
 1. Clone the repository
 2. Install dependencies:
 ```bash
-pip install anthropic google-generativeai python-dotenv
+pip install -r requirements.txt
 ```
 
 3. Create a `.env` file with your API keys:
 ```
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 GOOGLE_API_KEY=your_google_api_key_here
+```
+
+## Quick Start
+
+### Try the Demo
+See all features in action:
+```bash
+python demo.py
+```
+
+### Run Enhanced Evaluation Pipeline
+Get comprehensive metrics with the golden test suite:
+```bash
+# Full evaluation with baseline + sensitivity testing
+python evaluation_pipeline.py --model claude-sonnet-4.5 --judge claude-sonnet-4.5
+
+# Just baseline evaluation
+python baseline.py --model claude-sonnet-4.5
+
+# Test prompt sensitivity
+python sensitivity.py "Explain quantum computing" --model claude-sonnet-4.5
+
+# View evaluation trends
+python tracking.py trends
 ```
 
 ## Usage
