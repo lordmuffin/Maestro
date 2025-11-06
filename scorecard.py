@@ -23,6 +23,49 @@ load_dotenv()
 
 
 # Configuration
+def read_prompts_from_file(file_path: str) -> List[str]:
+    """
+    Read prompts from a .md or .txt file.
+    Supports multiple prompts separated by '---' on its own line.
+
+    Args:
+        file_path: Path to the prompt file (.md or .txt)
+
+    Returns:
+        List of prompt strings
+
+    Raises:
+        ValueError: If file doesn't exist or has invalid extension
+    """
+    # Check file extension
+    if not (file_path.endswith('.md') or file_path.endswith('.txt')):
+        raise ValueError(f"Prompt file must be .md or .txt, got: {file_path}")
+
+    # Check if file exists
+    if not os.path.exists(file_path):
+        raise ValueError(f"Prompt file not found: {file_path}")
+
+    # Read file content
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    # Split by --- separator (on its own line)
+    # Handle various line ending styles
+    prompts = []
+    parts = content.split('\n---\n')
+
+    for part in parts:
+        # Strip leading/trailing whitespace
+        prompt = part.strip()
+        if prompt:  # Only add non-empty prompts
+            prompts.append(prompt)
+
+    if not prompts:
+        raise ValueError(f"No prompts found in file: {file_path}")
+
+    return prompts
+
+
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description='LLM Comparison Scorecard')
@@ -73,12 +116,12 @@ def parse_arguments():
     parser.add_argument(
         '--prompt-a',
         type=str,
-        help='First prompt to test in Prompt-vs-Prompt mode (required when --mode=prompt)'
+        help='First prompt to test in Prompt-vs-Prompt mode (required when --mode=prompt). Can be a string or path to .md/.txt file. Files can contain multiple prompts separated by "---".'
     )
     parser.add_argument(
         '--prompt-b',
         type=str,
-        help='Second prompt to test in Prompt-vs-Prompt mode (required when --mode=prompt)'
+        help='Second prompt to test in Prompt-vs-Prompt mode (required when --mode=prompt). Can be a string or path to .md/.txt file. Files can contain multiple prompts separated by "---".'
     )
     parser.add_argument(
         '--criteria',
@@ -888,10 +931,11 @@ def generate_comparison_report(eval_results: Dict = None) -> str:
 async def run_prompt_evaluation() -> Dict:
     """
     Run Prompt-vs-Prompt evaluation: compare two prompts on the same model.
+    Supports file inputs with multiple prompts separated by '---'.
     Returns a nested dictionary with all results and statistics.
     """
-    prompt_a = CONFIG.prompt_a
-    prompt_b = CONFIG.prompt_b
+    prompt_a_input = CONFIG.prompt_a
+    prompt_b_input = CONFIG.prompt_b
     runs_per_prompt = CONFIG.runs_per_prompt
     criteria_type = CONFIG.criteria
 
@@ -911,74 +955,137 @@ async def run_prompt_evaluation() -> Dict:
     else:
         raise ValueError(f"Unknown provider: {model_config.provider}")
 
+    # Parse prompts from files or strings
+    def parse_prompt_input(prompt_input: str) -> List[str]:
+        """Parse prompt input - either a file path or direct string."""
+        # Check if it looks like a file path
+        if (prompt_input.endswith('.md') or prompt_input.endswith('.txt')) and os.path.exists(prompt_input):
+            print(f"  Loading prompts from file: {prompt_input}")
+            prompts = read_prompts_from_file(prompt_input)
+            print(f"  Found {len(prompts)} prompt(s) in file")
+            return prompts
+        else:
+            # Treat as direct prompt string
+            return [prompt_input]
+
+    prompts_a = parse_prompt_input(prompt_a_input)
+    prompts_b = parse_prompt_input(prompt_b_input)
+
     print(f"Running Prompt-vs-Prompt evaluation...")
     print(f"Model: {model_config.display_name}")
     print(f"Judge: {judge_model_config.display_name}")
     print(f"Criteria: {criteria_type}")
     print(f"Runs per prompt: {runs_per_prompt}")
+    print(f"Total comparisons: {len(prompts_a)} × {len(prompts_b)} = {len(prompts_a) * len(prompts_b)}")
     print()
 
-    # Results structure: {prompt_label: [run1_scores, run2_scores, ...]}
-    detailed_results = {
-        "Prompt A": [],
-        "Prompt B": []
-    }
+    # Store all comparison results
+    all_comparisons = []
 
-    prompts = {
-        "Prompt A": prompt_a,
-        "Prompt B": prompt_b
-    }
+    # Run comparisons for all combinations
+    comparison_idx = 0
+    for a_idx, prompt_a in enumerate(prompts_a):
+        for b_idx, prompt_b in enumerate(prompts_b):
+            comparison_idx += 1
 
-    # Evaluate both prompts
-    for prompt_label, prompt_text in prompts.items():
-        print(f"[{prompt_label}]")
-        print(f"  Text: {prompt_text[:80]}...")
-        print()
+            # Create labels
+            prompt_a_label = f"Prompt A" if len(prompts_a) == 1 else f"Prompt A.{a_idx + 1}"
+            prompt_b_label = f"Prompt B" if len(prompts_b) == 1 else f"Prompt B.{b_idx + 1}"
 
-        # Run multiple times
-        for run_idx in range(runs_per_prompt):
-            if runs_per_prompt > 1:
-                print(f"    Run {run_idx + 1}/{runs_per_prompt}...")
+            print(f"=" * 80)
+            print(f"Comparison {comparison_idx}/{len(prompts_a) * len(prompts_b)}")
+            print(f"=" * 80)
+            print()
 
-            # Call the API
-            response, response_time = await api_function(prompt_text, f"{prompt_label}-R{run_idx+1}", model_config)
+            # Results structure: {prompt_label: [run1_scores, run2_scores, ...]}
+            detailed_results = {
+                prompt_a_label: [],
+                prompt_b_label: []
+            }
 
-            # Score the response
-            scores, score_time = await score_response_with_llm(
-                prompt_text, response, task_type, criteria, f"{model_config.display_name}-{prompt_label}-R{run_idx+1}", judge_model_config
-            )
+            prompts = {
+                prompt_a_label: prompt_a,
+                prompt_b_label: prompt_b
+            }
 
-            # Store results
-            detailed_results[prompt_label].append(scores)
+            # Evaluate both prompts
+            for prompt_label, prompt_text in prompts.items():
+                print(f"[{prompt_label}]")
+                print(f"  Text: {prompt_text[:80]}...")
+                print()
 
-            if runs_per_prompt > 1:
-                print(f"      [OK] Completed run {run_idx + 1}")
+                # Run multiple times
+                for run_idx in range(runs_per_prompt):
+                    if runs_per_prompt > 1:
+                        print(f"    Run {run_idx + 1}/{runs_per_prompt}...")
 
-        print()
+                    # Call the API
+                    response, response_time = await api_function(prompt_text, f"{prompt_label}-R{run_idx+1}", model_config)
 
-    # Calculate aggregated scores
-    aggregated_scores = {}
-    for prompt_label in ["Prompt A", "Prompt B"]:
-        if detailed_results[prompt_label]:
-            mean_scores, _ = aggregate_scores(detailed_results[prompt_label])
-            aggregated_scores[prompt_label] = mean_scores
+                    # Score the response
+                    scores, score_time = await score_response_with_llm(
+                        prompt_text, response, task_type, criteria, f"{model_config.display_name}-{prompt_label}-R{run_idx+1}", judge_model_config
+                    )
 
-    # Return results in a structure compatible with report generation
-    return {
-        "aggregated": aggregated_scores,
-        "detailed": detailed_results,
-        "prompts": prompts,
-        "model": model_config.display_name,
-        "model_config": model_config,
-        "judge_config": judge_model_config,
-        "criteria": criteria,
-        "criteria_type": criteria_type,
-        "config": {
-            "mode": "prompt",
+                    # Store results
+                    detailed_results[prompt_label].append(scores)
+
+                    if runs_per_prompt > 1:
+                        print(f"      [OK] Completed run {run_idx + 1}")
+
+                print()
+
+            # Calculate aggregated scores for this comparison
+            aggregated_scores = {}
+            for prompt_label in [prompt_a_label, prompt_b_label]:
+                if detailed_results[prompt_label]:
+                    mean_scores, _ = aggregate_scores(detailed_results[prompt_label])
+                    aggregated_scores[prompt_label] = mean_scores
+
+            # Store this comparison
+            all_comparisons.append({
+                "aggregated": aggregated_scores,
+                "detailed": detailed_results,
+                "prompts": prompts,
+                "prompt_a_label": prompt_a_label,
+                "prompt_b_label": prompt_b_label
+            })
+
+    # If only one comparison, return it directly for backward compatibility
+    if len(all_comparisons) == 1:
+        comparison = all_comparisons[0]
+        return {
+            "aggregated": comparison["aggregated"],
+            "detailed": comparison["detailed"],
+            "prompts": comparison["prompts"],
             "model": model_config.display_name,
-            "runs_per_prompt": runs_per_prompt
+            "model_config": model_config,
+            "judge_config": judge_model_config,
+            "criteria": criteria,
+            "criteria_type": criteria_type,
+            "config": {
+                "mode": "prompt",
+                "model": model_config.display_name,
+                "runs_per_prompt": runs_per_prompt
+            }
         }
-    }
+    else:
+        # Multiple comparisons - return all of them
+        return {
+            "multiple_comparisons": True,
+            "comparisons": all_comparisons,
+            "model": model_config.display_name,
+            "model_config": model_config,
+            "judge_config": judge_model_config,
+            "criteria": criteria,
+            "criteria_type": criteria_type,
+            "config": {
+                "mode": "prompt",
+                "model": model_config.display_name,
+                "runs_per_prompt": runs_per_prompt,
+                "num_comparisons": len(all_comparisons)
+            }
+        }
 
 
 async def run_evaluation() -> Dict:
@@ -1220,6 +1327,62 @@ def save_report(timing_report: str, comparison_report: str, eval_results: Dict =
     return filepath
 
 
+def generate_multiple_prompt_comparison_report(eval_results: Dict) -> str:
+    """
+    Generate a comprehensive report for multiple prompt comparisons.
+    """
+    lines = []
+
+    # Header
+    model = eval_results["model"]
+    criteria_type = eval_results["criteria_type"]
+    config = eval_results["config"]
+
+    lines.append("# Multiple Prompt Comparison Report")
+    lines.append("")
+    lines.append(f"**Model Tested:** {model}")
+    lines.append(f"**Criteria Set:** {criteria_type}")
+    lines.append(f"**Configuration:** {config['runs_per_prompt']} runs per prompt")
+    lines.append(f"**Total Comparisons:** {config['num_comparisons']}")
+    lines.append("")
+
+    # Generate individual comparison reports
+    for idx, comparison in enumerate(eval_results["comparisons"], 1):
+        lines.append("---")
+        lines.append("")
+        lines.append(f"## Comparison {idx}/{config['num_comparisons']}")
+        lines.append("")
+
+        # Create a temporary eval_results dict for this comparison
+        temp_results = {
+            "aggregated": comparison["aggregated"],
+            "detailed": comparison["detailed"],
+            "prompts": comparison["prompts"],
+            "model": model,
+            "criteria": eval_results["criteria"],
+            "criteria_type": criteria_type,
+            "config": {
+                "runs_per_prompt": config["runs_per_prompt"]
+            }
+        }
+
+        # Generate report for this comparison (skip the header)
+        comparison_report = generate_prompt_comparison_report(temp_results)
+        # Remove the main header from each sub-report
+        report_lines = comparison_report.split('\n')
+        # Skip the first "# Prompt Comparison Report" line and blank lines until content
+        content_start = 0
+        for i, line in enumerate(report_lines):
+            if line.startswith("## Prompts Tested"):
+                content_start = i
+                break
+
+        lines.extend(report_lines[content_start:])
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 async def async_main():
     """
     Async main execution function.
@@ -1247,7 +1410,11 @@ async def async_main():
         TIMING.overall_time = time.time() - overall_start
 
         # Extract aggregated scores for backward compatibility
-        TEST_SCORES = EVAL_RESULTS["aggregated"]
+        if "multiple_comparisons" in EVAL_RESULTS and EVAL_RESULTS["multiple_comparisons"]:
+            # For multiple comparisons, use the first one for backward compatibility
+            TEST_SCORES = EVAL_RESULTS["comparisons"][0]["aggregated"]
+        else:
+            TEST_SCORES = EVAL_RESULTS["aggregated"]
 
         # Display timing report
         timing_report = generate_timing_report()
@@ -1260,7 +1427,10 @@ async def async_main():
 
         # Generate and display the comparison report (with detailed stats if available)
         if mode == 'prompt':
-            comparison_report = generate_prompt_comparison_report(EVAL_RESULTS)
+            if "multiple_comparisons" in EVAL_RESULTS and EVAL_RESULTS["multiple_comparisons"]:
+                comparison_report = generate_multiple_prompt_comparison_report(EVAL_RESULTS)
+            else:
+                comparison_report = generate_prompt_comparison_report(EVAL_RESULTS)
         else:
             comparison_report = generate_comparison_report(EVAL_RESULTS)
 

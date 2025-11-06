@@ -8,6 +8,7 @@ A comprehensive evaluation framework for comparing LLM models and prompts using 
 - **Two Evaluation Modes:**
   - **Model-vs-Model (MvM)**: Compare different LLM models (Gemini vs Claude)
   - **Prompt-vs-Prompt (PvP)**: Compare different prompts on the same model
+- **File-Based Prompts**: Load prompts from .md/.txt files with support for multiple prompts per file (separated by `---`)
 - **Automated Scoring**: Uses Claude as an expert judge to score responses
 - **Statistical Analysis**: Supports multiple runs with confidence intervals
 - **Weighted Criteria**: Customizable scoring criteria with configurable weights
@@ -140,9 +141,11 @@ python scorecard.py --mode prompt --model claude \
 ### Prompt-vs-Prompt Mode Arguments
 
 - `--model {gemini,claude}`: Model to test (required in prompt mode)
-- `--prompt-a TEXT`: First prompt (control) - required
-- `--prompt-b TEXT`: Second prompt (challenger) - required
+- `--prompt-a TEXT`: First prompt (control) - required. Can be a string or path to .md/.txt file
+- `--prompt-b TEXT`: Second prompt (challenger) - required. Can be a string or path to .md/.txt file
 - `--criteria {general,code}`: Criteria set to use (default: `general`)
+
+**File Support**: Both `--prompt-a` and `--prompt-b` can accept file paths to `.md` or `.txt` files. Files can contain multiple prompts separated by `---` on its own line. When multiple prompts are provided, all combinations will be evaluated.
 
 ## Scoring Criteria
 
@@ -248,29 +251,61 @@ For reliable results, use at least 5 runs:
 --runs-per-prompt 5
 ```
 
-### Comparing Complex Prompts
+### Using File-Based Prompts
 
-When prompts contain special characters or are very long, save them to files:
+You can now directly provide file paths for prompts instead of using command substitution. This is especially useful for:
+- Complex prompts with special characters
+- Very long prompts
+- Testing multiple prompt variations efficiently
+
+#### Single Prompt Per File
 
 ```bash
 # Create prompt files
-echo "Your control prompt here" > prompt_a.txt
-echo "Your challenger prompt here" > prompt_b.txt
+echo "Write a guide for urban gardening" > prompt_a.txt
+echo "Write a comprehensive guide for urban gardening with sections on recommended plants and seasonal planning" > prompt_b.txt
 
-# Use command substitution
+# Pass file paths directly
 python scorecard.py --mode prompt --model gemini \
-  --prompt-a "$(cat prompt_a.txt)" \
-  --prompt-b "$(cat prompt_b.txt)" \
-  --runs-per-prompt 5
+  --prompt-a prompt_a.txt \
+  --prompt-b prompt_b.txt \
+  --runs-per-prompt 3
 ```
 
-On Windows (PowerShell):
-```powershell
-python scorecard.py --mode prompt --model gemini `
-  --prompt-a (Get-Content prompt_a.txt -Raw) `
-  --prompt-b (Get-Content prompt_b.txt -Raw) `
-  --runs-per-prompt 5
+#### Multiple Prompts Per File
+
+Separate multiple prompts in a file using `---` on its own line:
+
+**prompts_a.md:**
+```markdown
+Write a short story about a robot learning to paint.
+---
+Explain the concept of machine learning in simple terms.
+---
+Create a haiku about artificial intelligence.
 ```
+
+**prompts_b.md:**
+```markdown
+Write a brief narrative about an AI learning artistic expression.
+---
+Describe machine learning concepts for beginners.
+```
+
+Run all combinations (3 × 2 = 6 comparisons):
+```bash
+python scorecard.py --mode prompt --model claude \
+  --prompt-a prompts_a.md \
+  --prompt-b prompts_b.md \
+  --runs-per-prompt 3
+```
+
+This will automatically:
+1. Read all prompts from both files
+2. Evaluate all prompt combinations (Prompt A.1 vs B.1, A.1 vs B.2, A.2 vs B.1, etc.)
+3. Generate a comprehensive report with all comparisons
+
+**Supported file types**: `.md` and `.txt`
 
 ### Interpreting Results
 
