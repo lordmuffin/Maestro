@@ -187,13 +187,21 @@ DEFAULT_MODELS = {
 
 
 # Define scoring criteria for different task types
+# Enhanced criteria with focus on accuracy, quality, and cost efficiency
+
 GENERAL_CRITERIA = [
-    ScoringCriteria("Accuracy", 1.0),
+    # Accuracy/Correctness (Priority #1)
+    ScoringCriteria("Factual Accuracy", 2.0),      # Higher weight for correctness
+    ScoringCriteria("Logical Consistency", 1.5),
+
+    # Response Quality (Priority #2)
     ScoringCriteria("Clarity & Coherence", 1.0),
-    ScoringCriteria("Adherence to Prompt", 1.0),
-    ScoringCriteria("Depth & Insight", 1.0),
-    ScoringCriteria("Creativity/Style", 1.0),
-    ScoringCriteria("Usability/Actionability", 1.0),
+    ScoringCriteria("Completeness", 1.0),
+    ScoringCriteria("Relevance to Query", 1.5),
+
+    # Practical aspects
+    ScoringCriteria("Actionability", 1.0),
+    ScoringCriteria("Appropriate Detail Level", 1.0),
 ]
 
 CODE_CRITERIA = [
@@ -202,6 +210,14 @@ CODE_CRITERIA = [
     ScoringCriteria("Efficiency/Performance", 1.0),
     ScoringCriteria("Readability & Style", 1.0),
     ScoringCriteria("Error Handling/Robustness", 2.0),
+]
+
+# New: Cost-aware criteria for when efficiency matters
+COST_AWARE_CRITERIA = [
+    ScoringCriteria("Response Conciseness", 2.0),  # Shorter = cheaper
+    ScoringCriteria("First-Try Success", 2.0),     # Avoiding iterations
+    ScoringCriteria("Factual Accuracy", 1.5),
+    ScoringCriteria("Completeness", 1.0),
 ]
 
 
