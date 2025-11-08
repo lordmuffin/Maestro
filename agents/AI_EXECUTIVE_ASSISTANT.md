@@ -57,11 +57,26 @@ The Tri-Hybrid approach addresses three key challenges:
 - `requirements.txt`: Dependencies for local RAG
 - `README.md`: Detailed documentation
 
-### Phase 2: Multi-Agent Orchestration 🔄 NEXT
+### Phase 2: Cloud Knowledge Integration 🔄 IN PROGRESS
 
-**Goal**: Implement agent coordination and task routing
+**Goal**: Bridge local and cloud file references for hybrid RAG workflows
 
-**Planned Components**:
+**Completed Components**:
+- ✅ PathMappingService: Bidirectional local ↔ cloud path translation
+- ✅ Path mangling logic (hierarchical → flat)
+- ✅ O(1) lookup performance with triple-index architecture
+- ✅ Bulk registration for efficient vault sync
+- ✅ JSON import/export for persistence
+- ✅ Statistics and monitoring
+
+**Status**: Path mapping core complete, implemented in `/agents/cloud_integration/`
+
+**Key Files**:
+- `path_mapping_service.py`: Main path mapping service (600+ lines)
+- `requirements.txt`: Dependencies (none - pure Python)
+- `README.md`: Comprehensive documentation
+
+**Planned Components** (Next in Phase 2):
 - [ ] Master orchestrator agent
 - [ ] Task decomposition system
 - [ ] Agent registry and capabilities
@@ -82,13 +97,18 @@ The Tri-Hybrid approach addresses three key challenges:
 │  Local  │ │  Cloud  │ │  Tool   │
 │   RAG   │ │  Agent  │ │ Agents  │
 └─────────┘ └─────────┘ └─────────┘
+      ↓           ↑
+┌─────────────────────────┐
+│  Path Mapping Service   │
+│  (Bridges local/cloud)  │
+└─────────────────────────┘
 ```
 
-**Key Decisions**:
-- When to use local vs. cloud processing
-- How to decompose complex tasks
-- What information to share between agents
-- How to maintain context across agent calls
+**Key Achievements**:
+- Solves critical data schema mismatch between local and cloud storage
+- Enables hybrid RAG: local retrieval + cloud LLM generation
+- Privacy-preserving: only file IDs sent to cloud, not content
+- High performance: O(1) translations with triple-index design
 
 ### Phase 3: Cloud Integration & Hybrid Reasoning 📋 PLANNED
 
@@ -254,7 +274,7 @@ async def execute_task(task, user_preferences):
 
 ## Technology Stack
 
-### Phase 1 (Current)
+### Phase 1 (Complete)
 - **Language**: Python 3.11+
 - **RAG Framework**: LlamaIndex
 - **Vector Store**: FAISS (in-memory)
@@ -262,7 +282,13 @@ async def execute_task(task, user_preferences):
 - **Document Reader**: ObsidianReader
 - **LLM**: Ollama (local inference)
 
-### Phase 2-4 (Planned)
+### Phase 2 (In Progress)
+- **Language**: Python 3.11+ (standard library only)
+- **Path Mapping**: Custom triple-index architecture
+- **Persistence**: JSON serialization
+- **Cloud Storage**: Google Drive API (planned)
+
+### Phase 3-4 (Planned)
 - **Orchestration**: Custom Python framework
 - **Cloud LLM**: Anthropic Claude API
 - **Web Framework**: FastAPI
@@ -282,6 +308,11 @@ Maestro/
 │   │   ├── __init__.py
 │   │   ├── local_rag_agent.py
 │   │   ├── requirements.txt
+│   │   └── README.md
+│   │
+│   ├── cloud_integration/          # Phase 2 ✅ (Path Mapping)
+│   │   ├── __init__.py
+│   │   ├── path_mapping_service.py
 │   │   └── README.md
 │   │
 │   ├── orchestrator/               # Phase 2 (planned)
@@ -342,7 +373,7 @@ Maestro/
 
 ## Getting Started
 
-### Phase 1 Setup
+### Phase 1: Local RAG Agent
 
 1. Clone the repository
 2. Navigate to the local RAG agent:
@@ -362,11 +393,34 @@ Maestro/
 
 5. See detailed usage in `agents/local_rag/README.md`
 
+### Phase 2: Path Mapping Service
+
+1. Navigate to cloud integration:
+   ```bash
+   cd agents/cloud_integration
+   ```
+
+2. Run the demonstration (no dependencies needed - pure Python):
+   ```bash
+   python path_mapping_service.py
+   ```
+
+3. See detailed usage in `agents/cloud_integration/README.md`
+
+4. Use in your code:
+   ```python
+   from agents.cloud_integration import PathMappingService
+
+   service = PathMappingService()
+   service.register_file('Projects/Plan.md', 'gdrive_id_123')
+   gdrive_id = service.resolve_to_gdrive_id('Projects/Plan.md')
+   ```
+
 ### Next Steps
 
-- **For Developers**: Review Phase 2 plan and contribute to orchestrator design
-- **For Users**: Test Phase 1 with your Obsidian vault and provide feedback
-- **For Researchers**: Explore privacy-preserving RAG techniques
+- **For Developers**: Contribute to orchestrator design (next in Phase 2)
+- **For Users**: Test with your Obsidian vault synced to Google Drive
+- **For Researchers**: Explore hybrid local/cloud RAG architectures
 
 ## Success Metrics
 
@@ -377,11 +431,15 @@ Maestro/
 - [x] All processing happens locally
 - [x] Response time < 2 seconds per query
 
-### Phase 2 Metrics (Target)
-- [ ] Route 80%+ of tasks to appropriate agent
-- [ ] Support 5+ concurrent agent operations
-- [ ] Maintain context across multi-turn conversations
-- [ ] <100ms orchestration overhead
+### Phase 2 Metrics (In Progress)
+- [x] O(1) path translation performance ✅
+- [x] Bidirectional mapping (local ↔ cloud) ✅
+- [x] Support bulk registration (efficient sync) ✅
+- [x] JSON persistence for durability ✅
+- [ ] Route 80%+ of tasks to appropriate agent (orchestrator - next)
+- [ ] Support 5+ concurrent agent operations (orchestrator - next)
+- [ ] Maintain context across multi-turn conversations (orchestrator - next)
+- [ ] <100ms orchestration overhead (orchestrator - next)
 
 ### Phase 3 Metrics (Target)
 - [ ] Cloud agent used for <20% of queries
@@ -463,8 +521,8 @@ We're actively developing Phase 2 (Multi-Agent Orchestration). Contributions wel
 
 ---
 
-**Project Status**: Phase 1 Complete ✅ | Phase 2 In Planning 📋
+**Project Status**: Phase 1 Complete ✅ | Phase 2 Path Mapping Complete ✅ | Orchestrator Next 🔄
 
 **Last Updated**: 2025-11-08
 
-**Next Milestone**: Phase 2 Orchestrator Implementation
+**Next Milestone**: Phase 2 Multi-Agent Orchestrator Implementation
