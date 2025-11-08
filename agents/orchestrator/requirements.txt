@@ -1,0 +1,17 @@
+# Orchestrator Requirements - Phase 3
+# =====================================
+# Multi-LLM orchestration using LangGraph
+
+# Core orchestration framework
+langgraph>=0.0.20
+langchain-core>=0.1.0
+
+# State management and validation
+pydantic>=2.0.0
+
+# Optional: For actual LLM integration (not used in demo)
+# langchain-anthropic>=0.1.0  # For Claude integration
+# langchain-google-genai>=0.1.0  # For Gemini integration
+
+# Utilities
+typing-extensions>=4.0.0
