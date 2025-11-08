@@ -1,0 +1,28 @@
+# Local RAG Agent - Phase 1 Requirements
+# ========================================
+# Privacy-first RAG system using local embeddings and vector storage
+
+# Core LlamaIndex framework
+llama-index>=0.10.0
+llama-index-core>=0.10.0
+
+# Vector store integration
+llama-index-vector-stores-faiss>=0.1.0
+faiss-cpu>=1.7.4
+
+# Embedding models
+llama-index-embeddings-huggingface>=0.1.0
+sentence-transformers>=2.2.0
+
+# Document readers
+llama-index-readers-obsidian>=0.1.0
+llama-index-readers-file>=0.1.0
+
+# Utilities
+numpy>=1.24.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# Optional: For actual Ollama integration (not used in mock version)
+# requests>=2.31.0
+# ollama>=0.1.0
