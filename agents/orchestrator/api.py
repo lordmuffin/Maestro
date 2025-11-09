@@ -16,12 +16,17 @@ class TaskRequest(BaseModel):
     query: str
     sensitivity: Optional[str] = "medium"  # low, medium, high
     task_type: Optional[str] = None  # synthesis, automation, retrieval
+    llm_provider: Optional[str] = None  # local, claude, gemini, openai
+    model_tier: Optional[str] = None  # fast, standard, premium
 
 class TaskResponse(BaseModel):
     status: str
     result: Any
     agent_used: str
     execution_time: Optional[float] = None
+    provider_used: Optional[str] = None
+    model_used: Optional[str] = None
+    privacy_warning: Optional[str] = None
 
 class TaskStatusRequest(BaseModel):
     task_id: str
@@ -76,12 +81,39 @@ async def health_check():
 @app.post("/execute", response_model=TaskResponse)
 async def execute_task(request: TaskRequest):
     """
-    Execute a task with intelligent agent routing
+    Execute a task with intelligent agent routing and optional LLM provider/model selection
     """
     try:
+        import model_registry
+
         supervisor = get_supervisor()
         if supervisor is None:
             raise HTTPException(status_code=503, detail="Supervisor agent not initialized")
+
+        # Determine provider and model
+        provider = request.llm_provider
+        tier = request.model_tier or model_registry.get_default_tier()
+        sensitivity = request.sensitivity or "medium"
+
+        # If provider specified, validate it
+        if provider:
+            is_available, error_msg = model_registry.check_provider_available(provider)
+            if not is_available:
+                raise HTTPException(status_code=400, detail=error_msg)
+
+            # Get model for tier
+            try:
+                model = model_registry.get_model_for_tier(provider, tier)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        else:
+            provider = None
+            model = None
+
+        # Check for privacy warnings
+        should_warn, warning_msg = None, None
+        if provider:
+            should_warn, warning_msg = model_registry.check_privacy_warning(provider, sensitivity)
 
         # Execute the task
         import time
@@ -90,10 +122,15 @@ async def execute_task(request: TaskRequest):
         if hasattr(supervisor, 'execute'):
             result = supervisor.execute(
                 query=request.query,
-                sensitivity=request.sensitivity,
-                task_type=request.task_type
+                sensitivity=sensitivity,
+                task_type=request.task_type,
+                llm_provider=provider,
+                model=model
             )
             agent_used = result.get("agent", "unknown") if isinstance(result, dict) else "unknown"
+            # Extract provider/model from result if available
+            provider_used = result.get("provider", provider)
+            model_used = result.get("model", model)
         else:
             # Fallback response
             result = {
@@ -101,6 +138,8 @@ async def execute_task(request: TaskRequest):
                 "query": request.query
             }
             agent_used = "supervisor"
+            provider_used = provider
+            model_used = model
 
         execution_time = time.time() - start_time
 
@@ -108,8 +147,13 @@ async def execute_task(request: TaskRequest):
             status="success",
             result=result,
             agent_used=agent_used,
-            execution_time=execution_time
+            execution_time=execution_time,
+            provider_used=provider_used,
+            model_used=model_used,
+            privacy_warning=warning_msg if should_warn else None
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

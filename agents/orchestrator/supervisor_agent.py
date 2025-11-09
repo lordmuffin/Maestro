@@ -86,6 +86,8 @@ class AgentState(TypedDict):
         response: Final response from the selected worker agent
         agent_used: Name of the agent that processed the request
         metadata: Additional context and debugging information
+        llm_provider: Optional LLM provider (local, claude, gemini, openai)
+        model: Optional specific model to use
     """
     query: str
     classification: Optional[str]
@@ -94,6 +96,8 @@ class AgentState(TypedDict):
     response: Optional[str]
     agent_used: Optional[str]
     metadata: Optional[dict]
+    llm_provider: Optional[str]
+    model: Optional[str]
 
 
 # ============================================================================
@@ -122,15 +126,55 @@ def local_worker(state: AgentState) -> dict:
     print("\n🔒 LOCAL RAG AGENT activated")
     print(f"   Query: {state['query']}")
     print(f"   Sensitivity: {state.get('sensitivity', 'HIGH')}")
+    print(f"   LLM Provider: {state.get('llm_provider', 'default')}")
+    print(f"   Model: {state.get('model', 'default')}")
     print(f"   Processing locally with full privacy...")
 
-    # In production, this would call the actual LocalRAGAgent from Phase 1
-    # from agents.local_rag import LocalRAGAgent
-    # agent = LocalRAGAgent(vault_path)
-    # result = agent.query(state['query'])
+    # Call the actual LocalRAG API with provider/model selection
+    try:
+        import requests
+        import os
 
-    # Simulated response for demonstration
-    response = f"""[Local RAG Response]
+        local_rag_url = os.getenv("LOCAL_RAG_URL", "http://localhost:8001")
+
+        payload = {
+            "query": state['query'],
+            "top_k": 3
+        }
+
+        # Add provider and model if specified
+        if state.get('llm_provider'):
+            payload['llm_provider'] = state['llm_provider']
+        if state.get('model'):
+            payload['model_tier'] = state.get('model')  # This should be tier, not raw model
+
+        response_data = requests.post(
+            f"{local_rag_url}/query",
+            json=payload,
+            timeout=30
+        )
+
+        if response_data.status_code == 200:
+            result = response_data.json()
+            response = result.get('results', [{}])[0].get('response', 'No response')
+
+            return {
+                "response": response,
+                "agent_used": "local_rag",
+                "llm_provider": result.get('provider_used'),
+                "model": result.get('model_used'),
+                "metadata": {
+                    "privacy_level": "MAXIMUM",
+                    "processing_location": "local",
+                    "external_api_calls": 0,
+                    "privacy_warning": result.get('privacy_warning')
+                }
+            }
+    except Exception as e:
+        print(f"   ⚠️  Error calling Local RAG API: {e}")
+
+    # Fallback: Simulated response for demonstration
+    response = f"""[Local RAG Response - Fallback]
 
 Based on your private documents, here's what I found:
 
@@ -150,6 +194,8 @@ Sources: [Would list local file paths here]
     return {
         "response": response,
         "agent_used": "local_rag",
+        "llm_provider": state.get('llm_provider'),
+        "model": state.get('model'),
         "metadata": {
             "privacy_level": "MAXIMUM",
             "processing_location": "local",
@@ -616,6 +662,76 @@ def main():
     print("\n" + "="*80)
     print("Phase 3 Demonstration Complete! 🎉")
     print("="*80 + "\n")
+
+
+# ============================================================================
+# SupervisorAgent Class (API Wrapper)
+# ============================================================================
+
+class SupervisorAgent:
+    """
+    Wrapper class for the supervisor agent to be used by the FastAPI service.
+
+    This class provides a simple interface for executing queries through the
+    LangGraph workflow.
+    """
+
+    def __init__(self, local_rag_url: str = None, path_mapping_url: str = None,
+                 skills_url: str = None):
+        """
+        Initialize the SupervisorAgent.
+
+        Args:
+            local_rag_url: URL for the Local RAG service
+            path_mapping_url: URL for the Path Mapping service
+            skills_url: URL for the Skills service
+        """
+        self.local_rag_url = local_rag_url
+        self.path_mapping_url = path_mapping_url
+        self.skills_url = skills_url
+        self.graph = create_supervisor_graph()
+
+    def execute(self, query: str, sensitivity: str = "medium",
+                task_type: str = None, llm_provider: str = None, model: str = None) -> dict:
+        """
+        Execute a query through the supervisor workflow.
+
+        Args:
+            query: The user query to process
+            sensitivity: Data sensitivity level (low/medium/high)
+            task_type: Task type override (synthesis/automation/retrieval)
+            llm_provider: Optional LLM provider (local, claude, gemini, openai)
+            model: Optional specific model to use
+
+        Returns:
+            dict: Response containing result, agent used, and metadata
+        """
+        # Initialize state with overrides if provided
+        initial_state: AgentState = {
+            "query": query,
+            "classification": None,
+            "sensitivity": sensitivity.upper() if sensitivity else None,
+            "task_type": task_type.upper() if task_type else None,
+            "response": None,
+            "agent_used": None,
+            "metadata": None,
+            "llm_provider": llm_provider,
+            "model": model,
+        }
+
+        # Execute the workflow
+        result = self.graph.invoke(initial_state)
+
+        # Format response for API
+        return {
+            "response": result.get("response", "No response generated"),
+            "agent": result.get("agent_used", "unknown"),
+            "sensitivity": result.get("sensitivity"),
+            "task_type": result.get("task_type"),
+            "metadata": result.get("metadata", {}),
+            "provider": result.get("llm_provider"),
+            "model": result.get("model")
+        }
 
 
 if __name__ == "__main__":

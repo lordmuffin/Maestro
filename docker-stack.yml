@@ -54,15 +54,18 @@ services:
     ports:
       - "8001:8001"
     environment:
-      - OBSIDIAN_VAULT_PATH=${OBSIDIAN_VAULT_PATH:-/vault}
+      - OBSIDIAN_VAULT_PATH=/vault
+      # LLM API Keys (optional - only use what you need)
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     volumes:
       - rag-data:/app/data
-      - rag-index:/app/data/index
       - ${VAULT_HOST_PATH:-./data/vault}:/vault:ro
     networks:
       - maestro-network
     deploy:
-      replicas: 2
+      replicas: 1
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -73,10 +76,10 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          memory: 4G
+          memory: 12G
         reservations:
           cpus: '1.0'
-          memory: 2G
+          memory: 6G
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8001/health')"]
       interval: 30s
@@ -225,8 +228,6 @@ volumes:
   evaluation-data:
     driver: local
   rag-data:
-    driver: local
-  rag-index:
     driver: local
   mapping-data:
     driver: local

@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir fastapi uvicorn[standard]
 # Copy application code
 COPY local_rag_agent.py .
 COPY api.py .
+COPY model_registry.py .
 
 # Create directories
 RUN mkdir -p /app/data/index /vault

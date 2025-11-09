@@ -70,6 +70,7 @@ docker stack services maestro
 
 ### 7. Test Services
 
+*Bash/curl:*
 ```bash
 # Test health endpoints
 curl http://localhost:8000/health  # Evaluation API
@@ -81,22 +82,56 @@ curl http://localhost:8004/health  # Skills
 # All should return: {"status":"healthy"}
 ```
 
+*PowerShell:*
+```powershell
+# Test all health endpoints
+$services = @(
+    @{Name="Evaluation API"; Port=8000},
+    @{Name="Local RAG"; Port=8001},
+    @{Name="Path Mapping"; Port=8002},
+    @{Name="Supervisor"; Port=8003},
+    @{Name="Skills"; Port=8004}
+)
+
+foreach ($service in $services) {
+    Write-Host "$($service.Name) (port $($service.Port)): " -NoNewline
+    try {
+        $response = Invoke-RestMethod -Uri "http://localhost:$($service.Port)/health"
+        if ($response.status -eq "healthy") {
+            Write-Host "✓ $($response.status)" -ForegroundColor Green
+        } else {
+            Write-Host "✗ $($response.status)" -ForegroundColor Red
+        }
+    } catch {
+        Write-Host "✗ Failed" -ForegroundColor Red
+    }
+}
+```
+
 ## Service URLs
 
 Once deployed, access services at:
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| Evaluation API | http://localhost:8000 | LLM evaluation |
-| Local RAG | http://localhost:8001 | Document retrieval |
-| Path Mapping | http://localhost:8002 | Path translation |
-| Supervisor | http://localhost:8003 | Task orchestration |
-| Skills | http://localhost:8004 | Skill execution |
+| Evaluation API | http://localhost:8000 | LLM evaluation & scoring |
+| Local RAG | http://localhost:8001 | Document retrieval with multi-provider LLM support |
+| Path Mapping | http://localhost:8002 | Path translation between systems |
+| Supervisor | http://localhost:8003 | Task orchestration with intelligent routing |
+| Skills | http://localhost:8004 | LLM-agnostic skill execution |
+
+**All APIs support:**
+- LLM provider selection (`local`, `claude`, `gemini`, `openai`)
+- Model tier selection (`fast`, `standard`, `premium`)
+- Privacy-aware data sensitivity levels (`low`, `medium`, `high`)
 
 ## Quick Tests
 
 ### Test Supervisor Agent
 
+**Basic Task Execution:**
+
+*Bash/curl:*
 ```bash
 curl -X POST http://localhost:8003/execute \
   -H "Content-Type: application/json" \
@@ -107,8 +142,75 @@ curl -X POST http://localhost:8003/execute \
   }'
 ```
 
+*PowerShell (formatted output):*
+```powershell
+Invoke-RestMethod -Method POST -Uri 'http://localhost:8003/execute' `
+  -Headers @{'Content-Type'='application/json'} `
+  -Body '{"query": "Hello, test the system", "sensitivity": "low", "task_type": "synthesis"}' `
+  | ConvertTo-Json -Depth 10
+```
+
+**With LLM Provider & Model Selection:**
+
+*Bash/curl:*
+```bash
+curl -X POST http://localhost:8003/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Analyze my project data",
+    "sensitivity": "medium",
+    "task_type": "synthesis",
+    "llm_provider": "local",
+    "model_tier": "premium"
+  }'
+```
+
+*PowerShell (formatted output):*
+```powershell
+Invoke-RestMethod -Method POST -Uri 'http://localhost:8003/execute' `
+  -Headers @{'Content-Type'='application/json'} `
+  -Body (ConvertTo-Json @{
+    query = "Analyze my project data"
+    sensitivity = "medium"
+    task_type = "synthesis"
+    llm_provider = "local"
+    model_tier = "premium"
+  }) | ConvertTo-Json -Depth 10
+```
+
+**Testing Privacy Warnings:**
+
+*Bash/curl:*
+```bash
+# Cloud provider + high sensitivity = privacy warning
+curl -X POST http://localhost:8003/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Summarize confidential data",
+    "sensitivity": "high",
+    "llm_provider": "claude",
+    "model_tier": "standard"
+  }'
+```
+
+*PowerShell (formatted output):*
+```powershell
+# Cloud provider + high sensitivity = privacy warning
+Invoke-RestMethod -Method POST -Uri 'http://localhost:8003/execute' `
+  -Headers @{'Content-Type'='application/json'} `
+  -Body (ConvertTo-Json @{
+    query = "Summarize confidential data"
+    sensitivity = "high"
+    llm_provider = "claude"
+    model_tier = "standard"
+  }) | ConvertTo-Json -Depth 10
+```
+
 ### Test Local RAG
 
+**Basic Query (Default Settings):**
+
+*Bash/curl:*
 ```bash
 curl -X POST http://localhost:8001/query \
   -H "Content-Type: application/json" \
@@ -118,11 +220,140 @@ curl -X POST http://localhost:8001/query \
   }'
 ```
 
+*PowerShell (formatted output):*
+```powershell
+Invoke-RestMethod -Method POST -Uri 'http://localhost:8001/query' `
+  -Headers @{'Content-Type'='application/json'} `
+  -Body (ConvertTo-Json @{
+    query = "What is in my knowledge base?"
+    top_k = 3
+  }) | ConvertTo-Json -Depth 10
+```
+
+**With LLM Provider Selection:**
+
+*Bash/curl:*
+```bash
+curl -X POST http://localhost:8001/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What is in my knowledge base?",
+    "top_k": 3,
+    "llm_provider": "local",
+    "model_tier": "standard",
+    "sensitivity": "high"
+  }'
+```
+
+*PowerShell (formatted output):*
+```powershell
+Invoke-RestMethod -Method POST -Uri 'http://localhost:8001/query' `
+  -Headers @{'Content-Type'='application/json'} `
+  -Body (ConvertTo-Json @{
+    query = "What is in my knowledge base?"
+    top_k = 3
+    llm_provider = "local"
+    model_tier = "standard"
+    sensitivity = "high"
+  }) | ConvertTo-Json -Depth 10
+```
+
+**Available Options:**
+- **Providers:** `local`, `claude`, `gemini`, `openai`
+- **Tiers:** `fast`, `standard`, `premium`
+- **Sensitivity:** `low`, `medium`, `high`
+
 ### List Available Skills
 
+*Bash/curl:*
 ```bash
 curl http://localhost:8004/skills
 ```
+
+*PowerShell (formatted output):*
+```powershell
+Invoke-RestMethod -Uri 'http://localhost:8004/skills' | ConvertTo-Json -Depth 10
+```
+
+### Test Skills API with LLM Selection
+
+*Bash/curl:*
+```bash
+curl -X POST http://localhost:8004/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "GenerateProjectSynthesis",
+    "parameters": {
+      "project_name": "Project Nexus",
+      "context": "Testing skill execution"
+    },
+    "llm_provider": "local",
+    "model_tier": "standard",
+    "sensitivity": "low"
+  }'
+```
+
+*PowerShell (formatted output):*
+```powershell
+Invoke-RestMethod -Method POST -Uri 'http://localhost:8004/execute' `
+  -Headers @{'Content-Type'='application/json'} `
+  -Body (ConvertTo-Json @{
+    skill_name = "GenerateProjectSynthesis"
+    parameters = @{
+      project_name = "Project Nexus"
+      context = "Testing skill execution"
+    }
+    llm_provider = "local"
+    model_tier = "standard"
+    sensitivity = "low"
+  } -Depth 10) | ConvertTo-Json -Depth 10
+```
+
+## LLM Provider Selection
+
+Maestro supports multiple LLM providers with tiered models:
+
+### Available Providers
+
+| Provider | Privacy | Requirements | Models |
+|----------|---------|--------------|--------|
+| **local** | Maximum (on-device) | Ollama running on localhost:11434 | llama2, llama2:7b, llama2:13b |
+| **claude** | Cloud-based | `ANTHROPIC_API_KEY` | claude-3-haiku, claude-3-5-sonnet, claude-3-5-opus |
+| **gemini** | Cloud-based | `GOOGLE_API_KEY` | gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp |
+| **openai** | Cloud-based | `OPENAI_API_KEY` | gpt-3.5-turbo, gpt-4o |
+
+### Model Tiers
+
+- **fast**: Quick responses, lower cost, good for simple queries
+- **standard**: Balanced performance (default)
+- **premium**: Best quality, higher cost, complex analysis
+
+### Privacy Features
+
+The system automatically generates warnings when using cloud providers with sensitive data:
+
+- **High sensitivity + cloud provider** → ⚠️ Warning with recommendation to use local
+- **Medium sensitivity + cloud provider** → ℹ️ Note about external processing
+- **Local provider** → No warnings regardless of sensitivity
+
+### Using PowerShell Test Script
+
+Run comprehensive tests across all providers and tiers:
+
+```powershell
+# From project root
+.\test-api.ps1
+
+# With verbose output
+.\test-api.ps1 -Verbose
+
+# Skip API key error tests
+.\test-api.ps1 -SkipErrors
+```
+
+This runs ~71 tests covering all provider/tier combinations.
+
+**📚 Full Documentation:** See `/docs/llm-provider-selection.md` for detailed API documentation, examples, and error handling.
 
 ## Common Commands
 
@@ -216,13 +447,17 @@ docker exec -it $(docker ps -q -f name=maestro_supervisor) \
 
 ## Next Steps
 
-✅ **Read the full documentation**: `/agents/DOCKER_SWARM_DEPLOYMENT.md`
+✅ **Read the full documentation**:
+   - Deployment: `/agents/DOCKER_SWARM_DEPLOYMENT.md`
+   - LLM Provider Selection: `/docs/llm-provider-selection.md`
 
-✅ **Configure monitoring**: Set up health check dashboards
+✅ **Configure LLM providers**: Set up API keys for Claude, Gemini, or OpenAI
+
+✅ **Test provider selection**: Run `.\test-api.ps1` to verify all providers
 
 ✅ **Add your data**: Copy your Obsidian vault to `data/vault/`
 
-✅ **Test integrations**: Try all API endpoints
+✅ **Configure monitoring**: Set up health check dashboards
 
 ✅ **Set up backups**: See backup section in full docs
 

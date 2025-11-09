@@ -37,6 +37,7 @@ try:
         Document,
     )
     from llama_index.core.node_parser import SimpleNodeParser
+    from llama_index.core.llms import MockLLM
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from llama_index.vector_stores.faiss import FaissVectorStore
     from llama_index.readers.obsidian import ObsidianReader
@@ -336,6 +337,8 @@ class LocalRAGAgent:
         """
         self.vault_path = vault_path
         self.embedding_model_name = embedding_model
+        self.index_dir = Path("/app/data/index")
+        self.index_pickle_path = Path("/app/data/index.pkl")
         self.index = None
         self.documents = []
 
@@ -346,11 +349,15 @@ class LocalRAGAgent:
         # Configure LlamaIndex settings
         self._configure_settings()
 
+        # Try to load persisted index (using pickle)
+        self._load_persisted_index()
+
     def _configure_settings(self):
         """
-        Configure global LlamaIndex settings for embeddings and chunking.
+        Configure global LlamaIndex settings for embeddings, LLM, and chunking.
 
         Uses HuggingFace embeddings for local processing (no API calls).
+        Configures LLM based on available API keys (flexible multi-provider support).
         """
         print("\n⚙️  Configuring LlamaIndex settings...")
 
@@ -361,13 +368,192 @@ class LocalRAGAgent:
             cache_folder="./models"  # Cache model locally
         )
 
+        # Configure LLM based on available API keys
+        llm_configured = self._configure_llm()
+
         # Configure chunk size for optimal retrieval
         # Smaller chunks = more precise retrieval but more chunks to search
         Settings.chunk_size = 512
         Settings.chunk_overlap = 50
 
         print("   ✓ Embedding model configured")
+        print(f"   ✓ LLM configured: {llm_configured}")
         print("   ✓ Chunk size: 512 tokens with 50 token overlap")
+
+    def _configure_llm(self) -> str:
+        """
+        Configure LLM based on available API keys.
+
+        Priority order:
+        1. Ollama (local, no API key needed)
+        2. Google Gemini (if GOOGLE_API_KEY is set)
+        3. OpenAI (if OPENAI_API_KEY is set)
+        4. Anthropic (if ANTHROPIC_API_KEY is set)
+        5. MockLLM (fallback for testing)
+
+        Returns:
+            str: Description of configured LLM
+        """
+        # Check for Ollama (local LLM server)
+        try:
+            import requests
+            response = requests.get("http://localhost:11434/api/tags", timeout=2)
+            if response.status_code == 200:
+                try:
+                    from llama_index.llms.ollama import Ollama
+                    Settings.llm = Ollama(model="llama2", request_timeout=120.0)
+                    return "Ollama (local)"
+                except ImportError:
+                    print("   ⚠️  Ollama detected but llama-index-llms-ollama not installed")
+        except Exception:
+            pass  # Ollama not available
+
+        # Check for Google Gemini API key
+        if os.getenv("GOOGLE_API_KEY"):
+            try:
+                from llama_index.llms.gemini import Gemini
+                Settings.llm = Gemini(model="gemini-1.5-pro", temperature=0.1)
+                return "Google Gemini 1.5 Pro"
+            except ImportError:
+                print("   ⚠️  GOOGLE_API_KEY found but llama-index-llms-gemini not installed")
+                print("   💡 Install with: pip install llama-index-llms-gemini")
+            except Exception as e:
+                print(f"   ⚠️  GOOGLE_API_KEY found but Gemini initialization failed: {e}")
+                print("   💡 Continuing to next provider...")
+
+        # Check for OpenAI API key
+        if os.getenv("OPENAI_API_KEY"):
+            try:
+                from llama_index.llms.openai import OpenAI
+                Settings.llm = OpenAI(model="gpt-3.5-turbo", temperature=0.1)
+                return "OpenAI GPT-3.5"
+            except ImportError:
+                print("   ⚠️  OPENAI_API_KEY found but llama-index-llms-openai not installed")
+            except Exception as e:
+                print(f"   ⚠️  OPENAI_API_KEY found but OpenAI initialization failed: {e}")
+                print("   💡 Continuing to next provider...")
+
+        # Check for Anthropic API key
+        if os.getenv("ANTHROPIC_API_KEY"):
+            try:
+                from llama_index.llms.anthropic import Anthropic
+                Settings.llm = Anthropic(model="claude-3-haiku-20240307")
+                return "Anthropic Claude Haiku"
+            except ImportError:
+                print("   ⚠️  ANTHROPIC_API_KEY found but llama-index-llms-anthropic not installed")
+            except Exception as e:
+                print(f"   ⚠️  ANTHROPIC_API_KEY found but Anthropic initialization failed: {e}")
+                print("   💡 Continuing to next provider...")
+
+        # Fallback to MockLLM for testing/development
+        Settings.llm = MockLLM(max_tokens=512)
+        return "MockLLM (local fallback)"
+
+    def _configure_specific_llm(self, provider: str, model: str):
+        """
+        Configure a specific LLM provider and model.
+
+        Args:
+            provider: Provider name (local, claude, gemini, openai)
+            model: Specific model to use
+        """
+        provider = provider.lower()
+
+        if provider == "local":
+            # Ollama local models
+            try:
+                from llama_index.llms.ollama import Ollama
+                Settings.llm = Ollama(model=model, request_timeout=120.0)
+                print(f"   ✓ Configured Ollama with model: {model}")
+            except ImportError:
+                raise ValueError("Ollama support not installed. Install with: pip install llama-index-llms-ollama")
+        elif provider == "claude":
+            # Anthropic Claude
+            if not os.getenv("ANTHROPIC_API_KEY"):
+                raise ValueError("ANTHROPIC_API_KEY not set")
+            try:
+                from llama_index.llms.anthropic import Anthropic
+                Settings.llm = Anthropic(model=model)
+                print(f"   ✓ Configured Anthropic Claude with model: {model}")
+            except ImportError:
+                raise ValueError("Anthropic support not installed. Install with: pip install llama-index-llms-anthropic")
+        elif provider == "gemini":
+            # Google Gemini
+            if not os.getenv("GOOGLE_API_KEY"):
+                raise ValueError("GOOGLE_API_KEY not set")
+            try:
+                from llama_index.llms.gemini import Gemini
+                Settings.llm = Gemini(model=model, temperature=0.1)
+                print(f"   ✓ Configured Google Gemini with model: {model}")
+            except ImportError:
+                raise ValueError("Gemini support not installed. Install with: pip install llama-index-llms-gemini")
+        elif provider == "openai":
+            # OpenAI
+            if not os.getenv("OPENAI_API_KEY"):
+                raise ValueError("OPENAI_API_KEY not set")
+            try:
+                from llama_index.llms.openai import OpenAI
+                Settings.llm = OpenAI(model=model, temperature=0.1)
+                print(f"   ✓ Configured OpenAI with model: {model}")
+            except ImportError:
+                raise ValueError("OpenAI support not installed. Install with: pip install llama-index-llms-openai")
+        else:
+            raise ValueError(f"Unknown provider: {provider}")
+
+    def _load_persisted_index(self):
+        """
+        Load a persisted index from disk if it exists (using pickle for reliability).
+        """
+        import pickle
+
+        try:
+            # Try pickle format first (more reliable for binary data)
+            if self.index_pickle_path.exists():
+                print(f"\n📦 Loading persisted index from {self.index_pickle_path}...")
+                try:
+                    with open(self.index_pickle_path, 'rb') as f:
+                        self.index = pickle.load(f)
+                    print("   ✓ Index loaded successfully from pickle file")
+                    return
+                except Exception as e:
+                    print(f"   ⚠️  Could not load pickle index: {e}")
+                    print(f"   💡 Deleting corrupt pickle file...")
+                    self.index_pickle_path.unlink(missing_ok=True)
+
+            # Fall back to JSON format (legacy)
+            if self.index_dir.exists() and (self.index_dir / "index_store.json").exists():
+                from llama_index.core import StorageContext, load_index_from_storage
+                print(f"\n📦 Loading persisted index from {self.index_dir}...")
+                try:
+                    storage_context = StorageContext.from_defaults(persist_dir=str(self.index_dir))
+                    self.index = load_index_from_storage(storage_context)
+                    print("   ✓ Index loaded successfully from JSON")
+                    # Convert to pickle format for next time
+                    self._save_index_pickle()
+                    return
+                except (UnicodeDecodeError, Exception) as e:
+                    print(f"   ⚠️  Could not load index: {e}")
+                    print(f"   💡 The index may be corrupted. Cleaning up...")
+                    # Remove corrupted index files
+                    import shutil
+                    shutil.rmtree(self.index_dir, ignore_errors=True)
+                    self.index = None
+                    return
+
+            print(f"\n📦 No persisted index found. Will build new index on first ingestion.")
+
+        except Exception as e:
+            print(f"   ⚠️  Unexpected error loading index: {e}")
+            self.index = None
+
+    def _save_index_pickle(self):
+        """Save index using pickle for reliable persistence."""
+        if self.index is not None:
+            import pickle
+            print(f"   → Saving index to {self.index_pickle_path}...")
+            with open(self.index_pickle_path, 'wb') as f:
+                pickle.dump(self.index, f)
+            print(f"   ✓ Index saved to pickle file")
 
     def ingest_documents(self) -> int:
         """
@@ -382,9 +568,13 @@ class LocalRAGAgent:
         print(f"\n📚 Ingesting documents from vault...")
 
         try:
-            # Use ObsidianReader for Obsidian-specific parsing
-            # This preserves wikilinks [[like this]] and other Obsidian features
-            reader = ObsidianReader(str(self.vault_path))
+            # Use SimpleDirectoryReader as fallback since ObsidianReader has issues
+            # Note: This won't preserve Obsidian-specific features like wikilinks
+            reader = SimpleDirectoryReader(
+                input_dir=str(self.vault_path),
+                recursive=True,
+                required_exts=[".md"]
+            )
 
             # Load all documents from the vault
             self.documents = reader.load_data()
@@ -444,6 +634,16 @@ class LocalRAGAgent:
                 show_progress=True
             )
 
+            # Persist the index to disk (JSON format - legacy, may have encoding issues)
+            try:
+                self.index.storage_context.persist(persist_dir=self.index_dir)
+                print(f"   ✓ Index persisted to {self.index_dir} (JSON)")
+            except Exception as persist_error:
+                print(f"   ⚠️  JSON persistence warning: {persist_error}")
+
+            # Also persist using pickle (more reliable for binary data)
+            self._save_index_pickle()
+
             print(f"   ✓ Index built successfully")
             print(f"   ✓ Vector dimension: {dimension}")
             print(f"   ✓ Index size: {faiss_index.ntotal} vectors")
@@ -452,7 +652,7 @@ class LocalRAGAgent:
             print(f"   ❌ Error building index: {e}")
             raise
 
-    def query(self, query_text: str, top_k: int = 3) -> Dict[str, Any]:
+    def query(self, query_text: str, top_k: int = 3, llm_provider: str = None, model: str = None) -> Dict[str, Any]:
         """
         Execute a RAG query: retrieve relevant context and generate a response.
 
@@ -465,10 +665,15 @@ class LocalRAGAgent:
         Args:
             query_text: The user's question
             top_k: Number of document chunks to retrieve
+            llm_provider: Optional LLM provider (local, claude, gemini, openai)
+            model: Optional specific model to use
 
         Returns:
             dict: Contains the query, retrieved context, and generated response
         """
+        # Configure LLM if provider specified
+        if llm_provider and model:
+            self._configure_specific_llm(llm_provider, model)
         print(f"\n🔍 Processing query: '{query_text}'")
 
         if not self.index:

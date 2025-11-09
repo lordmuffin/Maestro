@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir fastapi uvicorn[standard] httpx
 # Copy application code
 COPY supervisor_agent.py .
 COPY api.py .
+COPY model_registry.py .
 
 # Expose port
 EXPOSE 8003

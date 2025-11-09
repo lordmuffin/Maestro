@@ -15,13 +15,17 @@ app = FastAPI(
 class SkillExecutionRequest(BaseModel):
     skill_name: str
     parameters: Dict[str, Any]
-    llm_provider: Optional[str] = "claude"  # claude, openai, gemini
+    llm_provider: Optional[str] = "claude"  # claude, openai, gemini, local
+    model_tier: Optional[str] = None  # fast, standard, premium
+    sensitivity: Optional[str] = "medium"  # low, medium, high
 
 class SkillExecutionResponse(BaseModel):
     status: str
     result: Any
     skill_name: str
     llm_provider: str
+    model_used: Optional[str] = None
+    privacy_warning: Optional[str] = None
 
 class SkillListResponse(BaseModel):
     status: str
@@ -107,34 +111,61 @@ async def list_skills():
 @app.post("/execute", response_model=SkillExecutionResponse)
 async def execute_skill(request: SkillExecutionRequest):
     """
-    Execute a skill with the specified LLM provider
+    Execute a skill with the specified LLM provider and model tier
     """
     try:
+        import model_registry
+
         registry = get_skill_registry()
         if registry is None:
             raise HTTPException(status_code=503, detail="Skill registry not initialized")
+
+        # Determine provider and model
+        provider = request.llm_provider or "claude"
+        tier = request.model_tier or model_registry.get_default_tier()
+        sensitivity = request.sensitivity or "medium"
+
+        # Validate provider availability
+        is_available, error_msg = model_registry.check_provider_available(provider)
+        if not is_available:
+            raise HTTPException(status_code=400, detail=error_msg)
+
+        # Get model for tier
+        try:
+            model = model_registry.get_model_for_tier(provider, tier)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        # Check for privacy warnings
+        should_warn, warning_msg = model_registry.check_privacy_warning(provider, sensitivity)
 
         # Execute the skill
         if hasattr(registry, 'execute_skill'):
             result = registry.execute_skill(
                 skill_name=request.skill_name,
                 parameters=request.parameters,
-                llm_provider=request.llm_provider
+                llm_provider=provider,
+                model=model
             )
         else:
             # Fallback response
             result = {
                 "message": f"Skill '{request.skill_name}' execution requested",
                 "parameters": request.parameters,
-                "provider": request.llm_provider
+                "provider": provider,
+                "model": model
             }
 
         return SkillExecutionResponse(
             status="success",
             result=result,
             skill_name=request.skill_name,
-            llm_provider=request.llm_provider
+            llm_provider=provider,
+            model_used=model,
+            privacy_warning=warning_msg if should_warn else None
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

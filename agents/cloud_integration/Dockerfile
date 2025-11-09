@@ -8,7 +8,7 @@ COPY path_mapping_service.py .
 COPY api.py .
 
 # Install FastAPI and uvicorn
-RUN pip install --no-cache-dir fastapi uvicorn[standard] pydantic
+RUN pip install --no-cache-dir fastapi uvicorn[standard] pydantic requests
 
 # Create data directory
 RUN mkdir -p /app/data

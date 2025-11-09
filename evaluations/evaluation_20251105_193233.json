@@ -1,0 +1,742 @@
+{
+  "timestamp": "2025-11-05T19:26:10.916616",
+  "model": "claude-sonnet-4.5",
+  "judge": "claude-sonnet-4.5",
+  "config": {
+    "test_cases": 10,
+    "include_sensitivity": true,
+    "max_concurrent": 3
+  },
+  "baseline": {
+    "report": {
+      "timestamp": "2025-11-05T19:27:37.303392",
+      "model_config": {
+        "provider": "claude",
+        "model_id": "claude-sonnet-4-5-20250929",
+        "display_name": "Claude Sonnet 4.5"
+      },
+      "judge_config": {
+        "provider": "claude",
+        "model_id": "claude-sonnet-4-5-20250929",
+        "display_name": "Claude Sonnet 4.5"
+      },
+      "total_test_cases": 10,
+      "test_results": [
+        {
+          "id": "TC001",
+          "category": "factual",
+          "difficulty": "medium",
+          "llm_scores": {
+            "Factual Accuracy": 5,
+            "Logical Consistency": 5,
+            "Clarity & Coherence": 5,
+            "Completeness": 4.5,
+            "Relevance to Query": 5,
+            "Actionability": 4.5,
+            "Appropriate Detail Level": 5
+          },
+          "human_scores": {
+            "Factual Accuracy": 5.0,
+            "Completeness": 4.5,
+            "Clarity & Coherence": 4.5,
+            "Relevance to Query": 5.0,
+            "Appropriate Detail Level": 4.0
+          },
+          "weighted_avg_llm": 4.888888888888889,
+          "weighted_avg_human": 4.6923076923076925,
+          "agreement_rate": 0.6
+        },
+        {
+          "id": "TC002",
+          "category": "factual",
+          "difficulty": "medium",
+          "llm_scores": {
+            "Factual Accuracy": 5,
+            "Logical Consistency": 5,
+            "Clarity & Coherence": 5,
+            "Completeness": 4,
+            "Relevance to Query": 5,
+            "Actionability": 3,
+            "Appropriate Detail Level": 5
+          },
+          "human_scores": {
+            "Factual Accuracy": 5.0,
+            "Completeness": 4.0,
+            "Clarity & Coherence": 4.5,
+            "Relevance to Query": 5.0,
+            "Logical Consistency": 5.0
+          },
+          "weighted_avg_llm": 4.666666666666667,
+          "weighted_avg_human": 4.785714285714286,
+          "agreement_rate": 0.8
+        },
+        {
+          "id": "TC003",
+          "category": "analytical",
+          "difficulty": "medium",
+          "llm_scores": {
+            "Factual Accuracy": 4.5,
+            "Logical Consistency": 5.0,
+            "Clarity & Coherence": 5.0,
+            "Completeness": 4.5,
+            "Relevance to Query": 5.0,
+            "Actionability": 3.5,
+            "Appropriate Detail Level": 4.5
+          },
+          "human_scores": {
+            "Logical Consistency": 4.5,
+            "Completeness": 4.5,
+            "Clarity & Coherence": 4.5,
+            "Relevance to Query": 5.0,
+            "Actionability": 4.0
+          },
+          "weighted_avg_llm": 4.611111111111111,
+          "weighted_avg_human": 4.541666666666667,
+          "agreement_rate": 0.4
+        },
+        {
+          "id": "TC004",
+          "category": "analytical",
+          "difficulty": "hard",
+          "llm_scores": {
+            "Factual Accuracy": 4.0,
+            "Logical Consistency": 4.5,
+            "Clarity & Coherence": 5.0,
+            "Completeness": 4.0,
+            "Relevance to Query": 5.0,
+            "Actionability": 3.0,
+            "Appropriate Detail Level": 4.5
+          },
+          "human_scores": {
+            "Factual Accuracy": 4.5,
+            "Logical Consistency": 5.0,
+            "Completeness": 4.5,
+            "Clarity & Coherence": 4.5,
+            "Appropriate Detail Level": 4.5
+          },
+          "weighted_avg_llm": 4.305555555555555,
+          "weighted_avg_human": 4.615384615384615,
+          "agreement_rate": 0.2
+        },
+        {
+          "id": "TC005",
+          "category": "creative",
+          "difficulty": "medium",
+          "llm_scores": {
+            "Factual Accuracy": 3.0,
+            "Logical Consistency": 4.5,
+            "Clarity & Coherence": 5.0,
+            "Completeness": 5.0,
+            "Relevance to Query": 5.0,
+            "Actionability": 4.5,
+            "Appropriate Detail Level": 5.0
+          },
+          "human_scores": {
+            "Clarity & Coherence": 4.5,
+            "Completeness": 4.0,
+            "Relevance to Query": 5.0,
+            "Actionability": 4.5,
+            "Appropriate Detail Level": 4.5
+          },
+          "weighted_avg_llm": 4.416666666666667,
+          "weighted_avg_human": 4.545454545454546,
+          "agreement_rate": 0.4
+        },
+        {
+          "id": "TC006",
+          "category": "code",
+          "difficulty": "medium",
+          "llm_scores": {
+            "Functional Correctness": 5,
+            "Adherence to Specs": 5,
+            "Efficiency/Performance": 5,
+            "Readability & Style": 5,
+            "Error Handling/Robustness": 5
+          },
+          "human_scores": {
+            "Functional Correctness": 5.0,
+            "Adherence to Specs": 5.0,
+            "Efficiency/Performance": 4.0,
+            "Readability & Style": 4.5,
+            "Error Handling/Robustness": 4.5
+          },
+          "weighted_avg_llm": 5.0,
+          "weighted_avg_human": 4.642857142857143,
+          "agreement_rate": 0.4
+        },
+        {
+          "id": "TC007",
+          "category": "code",
+          "difficulty": "hard",
+          "llm_scores": {
+            "Functional Correctness": 4.5,
+            "Adherence to Specs": 5.0,
+            "Efficiency/Performance": 4.0,
+            "Readability & Style": 5.0,
+            "Error Handling/Robustness": 4.0
+          },
+          "human_scores": {
+            "Functional Correctness": 4.5,
+            "Adherence to Specs": 5.0,
+            "Efficiency/Performance": 4.5,
+            "Readability & Style": 4.5,
+            "Error Handling/Robustness": 4.5
+          },
+          "weighted_avg_llm": 4.428571428571429,
+          "weighted_avg_human": 4.571428571428571,
+          "agreement_rate": 0.4
+        },
+        {
+          "id": "TC008",
+          "category": "instruction_following",
+          "difficulty": "easy",
+          "llm_scores": {
+            "Factual Accuracy": 5.0,
+            "Logical Consistency": 5.0,
+            "Clarity & Coherence": 5.0,
+            "Completeness": 5.0,
+            "Relevance to Query": 5.0,
+            "Actionability": 5.0,
+            "Appropriate Detail Level": 5.0
+          },
+          "human_scores": {
+            "Factual Accuracy": 4.5,
+            "Relevance to Query": 5.0,
+            "Completeness": 5.0,
+            "Appropriate Detail Level": 5.0,
+            "Clarity & Coherence": 4.5
+          },
+          "weighted_avg_llm": 5.0,
+          "weighted_avg_human": 4.769230769230769,
+          "agreement_rate": 0.6
+        },
+        {
+          "id": "TC009",
+          "category": "edge_case",
+          "difficulty": "hard",
+          "llm_scores": {
+            "Factual Accuracy": 4.0,
+            "Logical Consistency": 4.5,
+            "Clarity & Coherence": 5.0,
+            "Completeness": 4.0,
+            "Relevance to Query": 5.0,
+            "Actionability": 3.0,
+            "Appropriate Detail Level": 5.0
+          },
+          "human_scores": {
+            "Clarity & Coherence": 5.0,
+            "Relevance to Query": 5.0,
+            "Appropriate Detail Level": 5.0,
+            "Completeness": 4.0,
+            "Actionability": 4.5
+          },
+          "weighted_avg_llm": 4.361111111111111,
+          "weighted_avg_human": 4.7272727272727275,
+          "agreement_rate": 0.8
+        },
+        {
+          "id": "TC010",
+          "category": "edge_case",
+          "difficulty": "hard",
+          "llm_scores": {
+            "Factual Accuracy": 4.5,
+            "Logical Consistency": 5.0,
+            "Clarity & Coherence": 5.0,
+            "Completeness": 4.5,
+            "Relevance to Query": 5.0,
+            "Actionability": 4.0,
+            "Appropriate Detail Level": 5.0
+          },
+          "human_scores": {
+            "Factual Accuracy": 5.0,
+            "Completeness": 5.0,
+            "Logical Consistency": 5.0,
+            "Appropriate Detail Level": 4.5,
+            "Clarity & Coherence": 4.5
+          },
+          "weighted_avg_llm": 4.722222222222222,
+          "weighted_avg_human": 4.846153846153846,
+          "agreement_rate": 0.2
+        }
+      ],
+      "aggregate_metrics": {
+        "overall_agreement": 0.48,
+        "overall_correlation": 0.4119373567179181,
+        "correlation_p_value": 0.23685926491572148,
+        "mean_absolute_error": 0.20445526695526678,
+        "average_llm_score": 4.640079365079365,
+        "average_human_score": 4.673747086247086
+      },
+      "category_metrics": {
+        "factual": {
+          "agreement": 0.7,
+          "avg_llm_score": 4.777777777777779,
+          "avg_human_score": 4.739010989010989,
+          "count": 2
+        },
+        "analytical": {
+          "agreement": 0.30000000000000004,
+          "avg_llm_score": 4.458333333333333,
+          "avg_human_score": 4.5785256410256405,
+          "count": 2
+        },
+        "creative": {
+          "agreement": 0.4,
+          "avg_llm_score": 4.416666666666667,
+          "avg_human_score": 4.545454545454546,
+          "count": 1
+        },
+        "code": {
+          "agreement": 0.4,
+          "avg_llm_score": 4.714285714285714,
+          "avg_human_score": 4.607142857142858,
+          "count": 2
+        },
+        "instruction_following": {
+          "agreement": 0.6,
+          "avg_llm_score": 5.0,
+          "avg_human_score": 4.769230769230769,
+          "count": 1
+        },
+        "edge_case": {
+          "agreement": 0.5,
+          "avg_llm_score": 4.541666666666666,
+          "avg_human_score": 4.786713286713287,
+          "count": 2
+        }
+      },
+      "criterion_metrics": {
+        "Relevance to Query": 1.0,
+        "Appropriate Detail Level": 0.5,
+        "Factual Accuracy": 0.4,
+        "Clarity & Coherence": 0.125,
+        "Completeness": 0.625,
+        "Logical Consistency": 0.5,
+        "Actionability": 0.3333333333333333,
+        "Error Handling/Robustness": 0.0,
+        "Functional Correctness": 1.0,
+        "Adherence to Specs": 1.0,
+        "Readability & Style": 0.0,
+        "Efficiency/Performance": 0.0
+      }
+    },
+    "summary": "\n================================================================================\nBASELINE EVALUATION REPORT\n================================================================================\n\nTimestamp: 2025-11-05T19:27:37.303392\nModel: Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)\nJudge: Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)\nTest Cases: 10\n\n\ud83d\udcca AGGREGATE METRICS:\n  Overall Agreement:     48.00%\n  Overall Correlation:   0.412 (p=0.2369)\n  Mean Absolute Error:   0.204\n  Avg LLM Score:         4.64\n  Avg Human Score:       4.67\n\n\ud83d\udcc1 CATEGORY BREAKDOWN:\n  analytical:\n    Agreement:    30.00%\n    LLM Avg:      4.46\n    Human Avg:    4.58\n    Count:        2\n  code:\n    Agreement:    40.00%\n    LLM Avg:      4.71\n    Human Avg:    4.61\n    Count:        2\n  creative:\n    Agreement:    40.00%\n    LLM Avg:      4.42\n    Human Avg:    4.55\n    Count:        1\n  edge_case:\n    Agreement:    50.00%\n    LLM Avg:      4.54\n    Human Avg:    4.79\n    Count:        2\n  factual:\n    Agreement:    70.00%\n    LLM Avg:      4.78\n    Human Avg:    4.74\n    Count:        2\n  instruction_following:\n    Agreement:    60.00%\n    LLM Avg:      5.00\n    Human Avg:    4.77\n    Count:        1\n\n\ud83d\udccb CRITERION AGREEMENT:\n  Actionability                  33.33%  \u2717\n  Adherence to Specs             100.00%  \u2713\n  Appropriate Detail Level       50.00%  \u2717\n  Clarity & Coherence            12.50%  \u2717\n  Completeness                   62.50%  \u2717\n  Efficiency/Performance          0.00%  \u2717\n  Error Handling/Robustness       0.00%  \u2717\n  Factual Accuracy               40.00%  \u2717\n  Functional Correctness         100.00%  \u2713\n  Logical Consistency            50.00%  \u2717\n  Readability & Style             0.00%  \u2717\n  Relevance to Query             100.00%  \u2713\n\n\ud83c\udfaf ASSESSMENT:\n  \u2717 Overall agreement below target: 48.00% < 80%\n  \u2717 Correlation is weak: 0.412 < 0.70\n\n================================================================================\n"
+  },
+  "sensitivity": {
+    "individual_tests": [
+      {
+        "base_prompt": "Explain the key differences between TCP and UDP protocols in computer networking.",
+        "model": "Claude Sonnet 4.5",
+        "judge": "Claude Sonnet 4.5",
+        "num_variations": 7,
+        "results": [
+          {
+            "variation_name": "original",
+            "description": "Original prompt, unmodified",
+            "prompt": "Explain the key differences between TCP and UDP protocols in computer networking.",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4,
+              "Relevance to Query": 5,
+              "Actionability": 4,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.777777777777778
+          },
+          {
+            "variation_name": "lowercase",
+            "description": "Converted to lowercase",
+            "prompt": "explain the key differences between tcp and udp protocols in computer networking.",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4,
+              "Relevance to Query": 5,
+              "Actionability": 4,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.777777777777778
+          },
+          {
+            "variation_name": "title_case",
+            "description": "Converted to title case",
+            "prompt": "Explain The Key Differences Between Tcp And Udp Protocols In Computer Networking.",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4,
+              "Relevance to Query": 5,
+              "Actionability": 4,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.777777777777778
+          },
+          {
+            "variation_name": "double_spaces",
+            "description": "Doubled all spaces",
+            "prompt": "Explain  the  key  differences  between  TCP  and  UDP  protocols  in  computer  networking.",
+            "scores": {
+              "Factual Accuracy": 5.0,
+              "Logical Consistency": 5.0,
+              "Clarity & Coherence": 5.0,
+              "Completeness": 4.5,
+              "Relevance to Query": 5.0,
+              "Actionability": 4.5,
+              "Appropriate Detail Level": 5.0
+            },
+            "weighted_average": 4.888888888888889
+          },
+          {
+            "variation_name": "please_prefix",
+            "description": "Added 'Please' prefix",
+            "prompt": "Please explain the key differences between TCP and UDP protocols in computer networking.",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4,
+              "Relevance to Query": 5,
+              "Actionability": 4,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.777777777777778
+          },
+          {
+            "variation_name": "kindly_prefix",
+            "description": "Added 'Kindly' prefix",
+            "prompt": "Kindly explain the key differences between TCP and UDP protocols in computer networking.",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4,
+              "Relevance to Query": 5,
+              "Actionability": 4,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.777777777777778
+          },
+          {
+            "variation_name": "question_mark",
+            "description": "Changed punctuation to question mark",
+            "prompt": "Explain the key differences between TCP and UDP protocols in computer networking?",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4.5,
+              "Relevance to Query": 5,
+              "Actionability": 4.5,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.888888888888889
+          }
+        ],
+        "sensitivity_metrics": {
+          "variance": 0.002519526329050161,
+          "std_dev": 0.0501948834947364,
+          "coefficient_of_variation": 0.010436559934549151,
+          "range": 0.1111111111111116,
+          "max_deviation": 0.07936507936507908,
+          "is_stable": "True"
+        },
+        "original_score": 4.777777777777778,
+        "max_deviation_from_original": 0.1111111111111116,
+        "avg_deviation_from_original": 0.03174603174603189
+      },
+      {
+        "base_prompt": "What are the main causes of the 2008 financial crisis?",
+        "model": "Claude Sonnet 4.5",
+        "judge": "Claude Sonnet 4.5",
+        "num_variations": 7,
+        "results": [
+          {
+            "variation_name": "original",
+            "description": "Original prompt, unmodified",
+            "prompt": "What are the main causes of the 2008 financial crisis?",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4,
+              "Relevance to Query": 5,
+              "Actionability": 3,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.666666666666667
+          },
+          {
+            "variation_name": "with_period",
+            "description": "Added period at end",
+            "prompt": "What are the main causes of the 2008 financial crisis?.",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4.5,
+              "Relevance to Query": 5,
+              "Actionability": 3,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.722222222222222
+          },
+          {
+            "variation_name": "lowercase",
+            "description": "Converted to lowercase",
+            "prompt": "what are the main causes of the 2008 financial crisis?",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4.5,
+              "Relevance to Query": 5,
+              "Actionability": 3,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.722222222222222
+          },
+          {
+            "variation_name": "title_case",
+            "description": "Converted to title case",
+            "prompt": "What Are The Main Causes Of The 2008 Financial Crisis?",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4,
+              "Relevance to Query": 5,
+              "Actionability": 3,
+              "Appropriate Detail Level": 4
+            },
+            "weighted_average": 4.555555555555555
+          },
+          {
+            "variation_name": "double_spaces",
+            "description": "Doubled all spaces",
+            "prompt": "What  are  the  main  causes  of  the  2008  financial  crisis?",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4,
+              "Relevance to Query": 5,
+              "Actionability": 3,
+              "Appropriate Detail Level": 4
+            },
+            "weighted_average": 4.555555555555555
+          },
+          {
+            "variation_name": "please_prefix",
+            "description": "Added 'Please' prefix",
+            "prompt": "Please what are the main causes of the 2008 financial crisis?",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4.5,
+              "Relevance to Query": 5,
+              "Actionability": 3,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.722222222222222
+          },
+          {
+            "variation_name": "kindly_prefix",
+            "description": "Added 'Kindly' prefix",
+            "prompt": "Kindly what are the main causes of the 2008 financial crisis?",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 4.5,
+              "Relevance to Query": 5,
+              "Actionability": 3,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.722222222222222
+          }
+        ],
+        "sensitivity_metrics": {
+          "variance": 0.00529100529100531,
+          "std_dev": 0.07273929674533092,
+          "coefficient_of_variation": 0.01558699215971377,
+          "range": 0.16666666666666696,
+          "max_deviation": 0.11111111111111072,
+          "is_stable": "True"
+        },
+        "original_score": 4.666666666666667,
+        "max_deviation_from_original": 0.1111111111111116,
+        "avg_deviation_from_original": 0.06349206349206352
+      },
+      {
+        "base_prompt": "Analyze the advantages and disadvantages of remote work for both employees and employers.",
+        "model": "Claude Sonnet 4.5",
+        "judge": "Claude Sonnet 4.5",
+        "num_variations": 7,
+        "results": [
+          {
+            "variation_name": "original",
+            "description": "Original prompt, unmodified",
+            "prompt": "Analyze the advantages and disadvantages of remote work for both employees and employers.",
+            "scores": {
+              "Factual Accuracy": 4.5,
+              "Logical Consistency": 5.0,
+              "Clarity & Coherence": 5.0,
+              "Completeness": 4.5,
+              "Relevance to Query": 5.0,
+              "Actionability": 3.5,
+              "Appropriate Detail Level": 4.5
+            },
+            "weighted_average": 4.611111111111111
+          },
+          {
+            "variation_name": "lowercase",
+            "description": "Converted to lowercase",
+            "prompt": "analyze the advantages and disadvantages of remote work for both employees and employers.",
+            "scores": {
+              "Factual Accuracy": 4.5,
+              "Logical Consistency": 5.0,
+              "Clarity & Coherence": 5.0,
+              "Completeness": 5.0,
+              "Relevance to Query": 5.0,
+              "Actionability": 3.5,
+              "Appropriate Detail Level": 4.5
+            },
+            "weighted_average": 4.666666666666667
+          },
+          {
+            "variation_name": "title_case",
+            "description": "Converted to title case",
+            "prompt": "Analyze The Advantages And Disadvantages Of Remote Work For Both Employees And Employers.",
+            "scores": {
+              "Factual Accuracy": 4.5,
+              "Logical Consistency": 5.0,
+              "Clarity & Coherence": 5.0,
+              "Completeness": 4.5,
+              "Relevance to Query": 5.0,
+              "Actionability": 3.5,
+              "Appropriate Detail Level": 4.5
+            },
+            "weighted_average": 4.611111111111111
+          },
+          {
+            "variation_name": "double_spaces",
+            "description": "Doubled all spaces",
+            "prompt": "Analyze  the  advantages  and  disadvantages  of  remote  work  for  both  employees  and  employers.",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 5,
+              "Relevance to Query": 5,
+              "Actionability": 4,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.888888888888889
+          },
+          {
+            "variation_name": "please_prefix",
+            "description": "Added 'Please' prefix",
+            "prompt": "Please analyze the advantages and disadvantages of remote work for both employees and employers.",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 5,
+              "Relevance to Query": 5,
+              "Actionability": 4,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.888888888888889
+          },
+          {
+            "variation_name": "kindly_prefix",
+            "description": "Added 'Kindly' prefix",
+            "prompt": "Kindly analyze the advantages and disadvantages of remote work for both employees and employers.",
+            "scores": {
+              "Factual Accuracy": 4.5,
+              "Logical Consistency": 5.0,
+              "Clarity & Coherence": 5.0,
+              "Completeness": 4.5,
+              "Relevance to Query": 5.0,
+              "Actionability": 3.5,
+              "Appropriate Detail Level": 4.5
+            },
+            "weighted_average": 4.611111111111111
+          },
+          {
+            "variation_name": "question_mark",
+            "description": "Changed punctuation to question mark",
+            "prompt": "Analyze the advantages and disadvantages of remote work for both employees and employers?",
+            "scores": {
+              "Factual Accuracy": 5,
+              "Logical Consistency": 5,
+              "Clarity & Coherence": 5,
+              "Completeness": 5,
+              "Relevance to Query": 5,
+              "Actionability": 4,
+              "Appropriate Detail Level": 5
+            },
+            "weighted_average": 4.888888888888889
+          }
+        ],
+        "sensitivity_metrics": {
+          "variance": 0.017384731670446043,
+          "std_dev": 0.13185117242727135,
+          "coefficient_of_variation": 0.02782788563791656,
+          "range": 0.27777777777777857,
+          "max_deviation": 0.15079365079365026,
+          "is_stable": "True"
+        },
+        "original_score": 4.611111111111111,
+        "max_deviation_from_original": 0.27777777777777857,
+        "avg_deviation_from_original": 0.12698412698412742
+      }
+    ],
+    "aggregate": {
+      "avg_variance": 0.008398421096833837,
+      "stability_rate": 1.0
+    }
+  },
+  "kpis": {
+    "overall_agreement_rate": 0.48,
+    "agreement_by_category": {
+      "factual": 0.7,
+      "analytical": 0.30000000000000004,
+      "creative": 0.4,
+      "code": 0.4,
+      "instruction_following": 0.6,
+      "edge_case": 0.5
+    },
+    "agreement_by_criterion": {
+      "Relevance to Query": 1.0,
+      "Appropriate Detail Level": 0.5,
+      "Factual Accuracy": 0.4,
+      "Clarity & Coherence": 0.125,
+      "Completeness": 0.625,
+      "Logical Consistency": 0.5,
+      "Actionability": 0.3333333333333333,
+      "Error Handling/Robustness": 0.0,
+      "Functional Correctness": 1.0,
+      "Adherence to Specs": 1.0,
+      "Readability & Style": 0.0,
+      "Efficiency/Performance": 0.0
+    },
+    "inter_run_variance": 0.008398421096833837,
+    "position_bias_score": 0.0,
+    "avg_evaluation_time": 38.264108,
+    "cost_per_evaluation": 0.01,
+    "false_positive_rate": 0.05,
+    "false_negative_rate": 0.08,
+    "discrimination_power": 0.75,
+    "timestamp": "2025-11-05T19:32:33.560696",
+    "total_evaluations": 10,
+    "evaluation_mode": "baseline"
+  },
+  "summary": "\n\ud83d\udcca EVALUATION SUMMARY:\n\n\u2717 Overall: SOME KPI TARGETS NOT MET\n\nKey Findings:\n  \u2717 Judge-Human Agreement: 48.00% (below 80% target)\n  \u2717 Score Correlation: 0.412 (weak, target: \u22650.70)\n  \u2713 Stability: 100.00% of prompts stable\n\n\ud83d\udca1 RECOMMENDATIONS:\n\n\u2022 Improve judge prompt clarity and specificity\n\u2022 Review criteria definitions with evaluators\n\u2022 Consider additional training examples for judge\n\u2022 Investigate systematic biases in judge scoring\n\u2022 Ensure criteria are measurable and objective\n\u2022 Focus improvement on factual category (agreement: 70.00%)\n\u2022 Focus improvement on analytical category (agreement: 30.00%)\n\u2022 Focus improvement on creative category (agreement: 40.00%)\n\u2022 Focus improvement on code category (agreement: 40.00%)\n\u2022 Focus improvement on instruction_following category (agreement: 60.00%)\n\u2022 Focus improvement on edge_case category (agreement: 50.00%)\n",
+  "execution_time": 382.64908
+}

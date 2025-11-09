@@ -10,11 +10,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install additional dependencies for API
-RUN pip install --no-cache-dir fastapi uvicorn[standard]
+RUN pip install --no-cache-dir fastapi uvicorn[standard] requests
 
 # Copy application code
 COPY skill_abstraction_layer.py .
 COPY api.py .
+COPY model_registry.py .
 
 # Expose port
 EXPOSE 8004

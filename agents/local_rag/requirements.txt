@@ -22,7 +22,11 @@ llama-index-readers-file>=0.1.0
 numpy>=1.24.0
 pydantic>=2.0.0
 python-dotenv>=1.0.0
+requests>=2.31.0
 
-# Optional: For actual Ollama integration (not used in mock version)
-# requests>=2.31.0
-# ollama>=0.1.0
+# Optional LLM Integrations (only needed if using specific providers)
+# Uncomment the ones you want to use:
+# llama-index-llms-ollama>=0.1.0  # For local Ollama
+llama-index-llms-gemini>=0.1.0  # For Google Gemini
+# llama-index-llms-openai>=0.1.0  # For OpenAI GPT
+# llama-index-llms-anthropic>=0.1.0  # For Anthropic Claude
