@@ -3,21 +3,22 @@
 Local RAG Agent for Privacy-First Executive Assistant
 =====================================================
 
-This module implements a fully local Retrieval-Augmented Generation (RAG) system
+This module implements a Retrieval-Augmented Generation (RAG) system
 that processes Obsidian vault documents and provides context-aware responses
-using a local LLM (simulated via Ollama).
+using real LLM providers (Ollama, Gemini, OpenAI, Anthropic, or Claude).
 
 Key Components:
 - Mock Obsidian vault creation for testing
-- LlamaIndex-based document ingestion with ObsidianReader
+- LlamaIndex-based document ingestion with SimpleDirectoryReader
 - FAISS vector store for efficient similarity search
-- Mock Ollama LLM integration
+- Multi-provider LLM integration (auto-detects available providers)
 - Complete RAG pipeline for query processing
 
 Privacy Features:
-- All processing happens locally (no external API calls)
-- Vector embeddings stored in-memory
-- Mock data used for demonstration
+- Supports fully local LLM via Ollama (no external API calls)
+- Optional cloud LLM providers for enhanced capabilities
+- Vector embeddings generated locally
+- Configurable per-query LLM provider selection
 """
 
 import os
@@ -269,10 +270,13 @@ Related: [[Project Nexus]], [[AI Architecture]]
 
 def query_ollama_mock(prompt: str, context: str = "") -> str:
     """
-    Mock function simulating an Ollama API call to a local LLM.
+    DEPRECATED: Mock function for testing only.
 
-    In a production system, this would make an actual HTTP request to
-    a locally-running Ollama server (typically at http://localhost:11434).
+    This function is no longer used in production. The RAG agent now uses
+    real LLM providers (Ollama, Gemini, OpenAI, Anthropic, or Claude)
+    configured via the _configure_llm() method.
+
+    This is kept for backward compatibility and testing purposes only.
 
     Args:
         prompt: The user's query
@@ -287,7 +291,9 @@ def query_ollama_mock(prompt: str, context: str = "") -> str:
 
     # Generate a realistic mock response based on context
     if context:
-        response = f"""Based on the retrieved context from your knowledge base:
+        response = f"""[MOCK RESPONSE - Not from real LLM]
+
+Based on the retrieved context from your knowledge base:
 
 CONTEXT RETRIEVED:
 {context[:500]}{'...' if len(context) > 500 else ''}
@@ -311,7 +317,7 @@ Based on your notes, the key themes in Project Nexus include:
 These themes align with the broader goal of building an AI assistant that respects user privacy while remaining powerful and useful.
 """
     else:
-        response = "I don't have enough context to answer that question. Please try rephrasing or providing more details."
+        response = "[MOCK RESPONSE] I don't have enough context to answer that question. Please try rephrasing or providing more details."
 
     return response
 
@@ -686,7 +692,7 @@ class LocalRAGAgent:
                 response_mode="compact"  # Compact mode for efficient context usage
             )
 
-            # Retrieve relevant context
+            # Retrieve relevant context for display/debugging
             print(f"   → Retrieving top {top_k} relevant chunks...")
             retriever = self.index.as_retriever(similarity_top_k=top_k)
             retrieved_nodes = retriever.retrieve(query_text)
@@ -701,14 +707,17 @@ class LocalRAGAgent:
 
             context = "\n\n---\n\n".join(context_parts)
 
-            # Generate response using mock Ollama
-            print(f"   → Generating response with mock LLM...")
-            response = query_ollama_mock(query_text, context)
+            # Generate response using real LLM through query engine
+            print(f"   → Generating response with configured LLM...")
+            response_obj = query_engine.query(query_text)
+
+            # Extract the response text from the Response object
+            response_text = str(response_obj)
 
             return {
                 "query": query_text,
                 "context": context,
-                "response": response,
+                "response": response_text,
                 "num_chunks_retrieved": len(retrieved_nodes)
             }
 
