@@ -1,23 +1,10 @@
-version: '3.8'
-
 services:
   maestro-ui:
     build:
-      context: ./maestro-ui
+      context: .
       dockerfile: Dockerfile
     image: maestro/ui:latest
     container_name: maestro-ui
     ports:
       - "80:80"
-    networks:
-      - maestro-network
-    depends_on:
-      - supervisor
-      - local-rag
-      - path-mapping
-      - skills
     restart: unless-stopped
-
-networks:
-  maestro-network:
-    external: true

@@ -45,8 +45,8 @@ MODEL_REGISTRY: Dict[str, Dict[str, str]] = {
     },
     "claude": {
         "fast": "claude-3-haiku-20240307",
-        "standard": "claude-3-5-sonnet-20241022",
-        "premium": "claude-3-5-opus-20250514"
+        "standard": "claude-3-haiku-20240307",  # Using Haiku for standard until Sonnet access is available
+        "premium": "claude-3-haiku-20240307"   # Using Haiku for premium until Opus access is available
     },
     "gemini": {
         "fast": "gemini-1.5-flash",

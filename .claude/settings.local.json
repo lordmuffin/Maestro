@@ -28,7 +28,9 @@
       "Bash(cat:*)",
       "Bash(timeout 60 bash:*)",
       "Bash($null)",
-      "Bash(Select-String \"maestro_local-rag\")"
+      "Bash(Select-String \"maestro_local-rag\")",
+      "WebSearch",
+      "Bash(timeout 30 powershell:*)"
     ],
     "deny": [],
     "ask": []

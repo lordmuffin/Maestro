@@ -208,15 +208,13 @@ def claude_worker(state: AgentState) -> dict:
     """
     Claude Long-Context Synthesis Agent worker.
 
-    This worker handles complex synthesis tasks that benefit from Claude's
-    200K token context window. It uses Phase 2's Path Mapping Service to
-    provide Google Drive File IDs for vault access.
+    This worker handles general chat and synthesis tasks using Claude API.
 
     Use Cases:
+    - General conversation
+    - Question answering
     - Long-form document synthesis
-    - Complex multi-document analysis
-    - Strategic planning and ideation
-    - Research synthesis
+    - Complex analysis and reasoning
 
     Args:
         state: Current agent state
@@ -227,63 +225,73 @@ def claude_worker(state: AgentState) -> dict:
     print("\n🤖 CLAUDE AGENT activated")
     print(f"   Query: {state['query']}")
     print(f"   Task Type: {state.get('task_type', 'SYNTHESIS')}")
-    print(f"   Using Claude API with long-context capabilities...")
+    print(f"   LLM Provider: {state.get('llm_provider', 'claude')}")
+    print(f"   Model: {state.get('model', 'default')}")
+    print(f"   Calling Claude API...")
 
-    # In production, this would:
-    # 1. Use PathMappingService to get GDrive IDs
-    # 2. Call Claude API with file references
-    # 3. Synthesize comprehensive response
-    #
-    # from agents.cloud_integration import PathMappingService
-    # service = PathMappingService()
-    # gdrive_ids = [service.resolve_to_gdrive_id(path) for path in relevant_paths]
-    # response = claude_api.generate(query=state['query'], file_ids=gdrive_ids)
+    try:
+        import os
+        from anthropic import Anthropic
 
-    # Simulated response for demonstration
-    response = f"""[Claude Synthesis Response]
+        # Initialize Claude client
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY not set")
 
-I've analyzed the requested information using advanced long-context synthesis:
+        client = Anthropic(api_key=api_key)
 
-Query: "{state['query']}"
-
-Comprehensive Analysis:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-After reviewing the relevant documents (accessed via Google Drive API),
-here's a comprehensive synthesis:
-
-1. Key Themes:
-   • [Theme 1 based on document analysis]
-   • [Theme 2 with cross-document connections]
-   • [Theme 3 with strategic insights]
-
-2. Critical Insights:
-   • Long-form reasoning across multiple documents
-   • Nuanced understanding of context and implications
-   • Strategic recommendations
-
-3. Recommended Actions:
-   • [Action item 1]
-   • [Action item 2]
-   • [Action item 3]
-
-This response leveraged Claude's 200K token context to provide
-comprehensive, nuanced analysis across your document corpus.
-
-Note: Only file IDs were shared with Claude API (not raw content),
-maintaining a reasonable privacy boundary.
-"""
-
-    return {
-        "response": response,
-        "agent_used": "claude_synthesis",
-        "metadata": {
-            "privacy_level": "MEDIUM",
-            "processing_location": "cloud",
-            "context_window_used": "200K_tokens",
-            "files_referenced": "[Would list GDrive IDs]"
+        # Determine model based on tier or use full model name if provided
+        model_input = state.get('model', 'standard')
+        model_map = {
+            'fast': 'claude-3-haiku-20240307',
+            'standard': 'claude-3-haiku-20240307',  # Using Haiku until Sonnet access is available
+            'premium': 'claude-3-haiku-20240307'  # Using Haiku until Opus access is available
         }
-    }
+
+        # If model_input is a full model name (starts with "claude-"), use it directly
+        # Otherwise treat it as a tier and look it up
+        if isinstance(model_input, str) and model_input.startswith('claude-'):
+            model = model_input
+        else:
+            model = model_map.get(model_input, 'claude-3-haiku-20240307')  # Default to Claude Haiku
+
+        # Call Claude API
+        message = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            messages=[
+                {"role": "user", "content": state['query']}
+            ]
+        )
+
+        response = message.content[0].text
+
+        return {
+            "response": response,
+            "agent_used": "claude_synthesis",
+            "llm_provider": "claude",
+            "model": model,
+            "metadata": {
+                "privacy_level": "MEDIUM",
+                "processing_location": "cloud",
+                "model_used": model
+            }
+        }
+
+    except Exception as e:
+        print(f"   ⚠️  Error calling Claude API: {e}")
+        # Fallback response
+        return {
+            "response": f"I'm sorry, I encountered an error calling the Claude API: {str(e)}. Please ensure your ANTHROPIC_API_KEY is set correctly.",
+            "agent_used": "claude_synthesis",
+            "llm_provider": "claude",
+            "model": "error",
+            "metadata": {
+                "privacy_level": "MEDIUM",
+                "processing_location": "cloud",
+                "error": str(e)
+            }
+        }
 
 
 def gemini_worker(state: AgentState) -> dict:
@@ -401,26 +409,17 @@ def classify_query(state: AgentState) -> dict:
     # Routing Matrix Implementation
     # Priority: Sensitivity → Task Type → Agent Selection
 
-    # HIGH SENSITIVITY: Check for privacy indicators
-    privacy_keywords = ['private', 'confidential', 'secret', 'personal', 'sensitive']
-    if any(keyword in query for keyword in privacy_keywords):
+    # LOCAL RAG: Document/vault search queries
+    document_keywords = ['vault', 'document', 'documents', 'notes', 'obsidian', 'search my',
+                        'find in my', 'what does my', 'show me from', 'knowledge base',
+                        'private', 'confidential', 'secret', 'personal', 'sensitive']
+    if any(keyword in query for keyword in document_keywords):
         classification = "local"
-        sensitivity = "HIGH"
+        sensitivity = "HIGH" if any(k in query for k in ['private', 'confidential', 'secret']) else "MEDIUM"
         task_type = "RETRIEVAL"
         print(f"\n→ Decision: Route to LOCAL RAG Agent")
-        print(f"   Reason: HIGH sensitivity detected (privacy-first)")
-        print(f"   Keywords matched: {[k for k in privacy_keywords if k in query]}")
-
-    # SYNTHESIS TASK: Long-form analysis
-    elif any(keyword in query for keyword in ['synthesize', 'analyze', 'compare',
-                                               'summarize', 'research', 'explain',
-                                               'comprehensive', 'deep dive']):
-        classification = "claude"
-        sensitivity = "MEDIUM"
-        task_type = "SYNTHESIS"
-        print(f"\n→ Decision: Route to CLAUDE Agent")
-        print(f"   Reason: SYNTHESIS task requires long-context analysis")
-        print(f"   Task: Complex reasoning across documents")
+        print(f"   Reason: Document/vault search requested")
+        print(f"   Keywords matched: {[k for k in document_keywords if k in query]}")
 
     # AUTOMATION TASK: G-Suite operations
     elif any(keyword in query for keyword in ['update sheet', 'spreadsheet', 'calendar',
@@ -433,14 +432,14 @@ def classify_query(state: AgentState) -> dict:
         print(f"   Reason: AUTOMATION task for G-Suite integration")
         print(f"   Task: Workspace automation workflow")
 
-    # DEFAULT: Privacy-first fallback
+    # DEFAULT: General chat/synthesis - route to Claude or user's selected provider
     else:
-        classification = "local"
+        classification = "claude"
         sensitivity = "LOW"
-        task_type = "RETRIEVAL"
-        print(f"\n→ Decision: Route to LOCAL RAG Agent (default)")
-        print(f"   Reason: No specific indicators, defaulting to privacy-first")
-        print(f"   Task: Standard document retrieval")
+        task_type = "SYNTHESIS"
+        print(f"\n→ Decision: Route to CLAUDE Agent (default)")
+        print(f"   Reason: General query - using conversational LLM")
+        print(f"   Task: General chat/question answering")
 
     print("="*80)
 

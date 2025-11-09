@@ -2,8 +2,7 @@ import { apiClient } from './client'
 import type { ServiceHealthCheck, ServicesHealth } from '@/types/services'
 
 const checkService = async (
-  endpoint: string,
-  serviceName: string
+  endpoint: string
 ): Promise<ServiceHealthCheck> => {
   const startTime = Date.now()
 
@@ -29,11 +28,11 @@ const checkService = async (
 export const servicesAPI = {
   checkAll: async (): Promise<ServicesHealth> => {
     const [supervisor, rag, mapping, skills, evaluation] = await Promise.all([
-      checkService('/supervisor', 'supervisor'),
-      checkService('/rag', 'rag'),
-      checkService('/mapping', 'mapping'),
-      checkService('/skills', 'skills'),
-      checkService('/evaluation', 'evaluation'),
+      checkService('/supervisor'),
+      checkService('/rag'),
+      checkService('/mapping'),
+      checkService('/skills'),
+      checkService('/evaluation'),
     ])
 
     return {
@@ -45,11 +44,11 @@ export const servicesAPI = {
     }
   },
 
-  checkSupervisor: () => checkService('/supervisor', 'supervisor'),
-  checkRAG: () => checkService('/rag', 'rag'),
-  checkMapping: () => checkService('/mapping', 'mapping'),
-  checkSkills: () => checkService('/skills', 'skills'),
-  checkEvaluation: () => checkService('/evaluation', 'evaluation'),
+  checkSupervisor: () => checkService('/supervisor'),
+  checkRAG: () => checkService('/rag'),
+  checkMapping: () => checkService('/mapping'),
+  checkSkills: () => checkService('/skills'),
+  checkEvaluation: () => checkService('/evaluation'),
 }
 
 export function getPort(serviceName: string): number {

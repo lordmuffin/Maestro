@@ -4,21 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { supervisorAPI } from '@/lib/api/supervisor';
 import { LLMSelector } from '@/components/Settings/LLMSelector';
 import { ServiceHealthIndicator } from '@/components/Dashboard/ServiceHealthIndicator';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  agent?: string;
-  timestamp: Date;
-  metadata?: {
-    provider?: string;
-    model?: string;
-    sensitivity?: string;
-    privacyWarning?: string;
-    executionTime?: number;
-  };
-}
+import type { Message } from '@/types/chat';
 
 export function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
