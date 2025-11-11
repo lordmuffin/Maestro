@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db
-from api.routes import health, rag, tasks, cloud_rag, path_mapping
+from api.routes import health, rag, tasks, cloud_rag, path_mapping, skills
 import logging
 
 # Configure logging
@@ -47,13 +47,19 @@ app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"])
 app.include_router(cloud_rag.router, prefix="/api/v1/cloud-rag", tags=["cloud-rag"])
 app.include_router(path_mapping.router, prefix="/api/v1/path-mapping", tags=["path-mapping"])
 app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
+app.include_router(skills.router, prefix="/api/v1/skills", tags=["skills"])
 
 @app.get("/")
 async def root():
     """Root endpoint."""
     return {
         "name": "Maestro AI Executive Assistant",
-        "version": "0.1.0",
+        "version": "0.4.0",
         "status": "running",
-        "phase": "Phase 2: Cloud Knowledge Integration"
+        "phase": "Phase 4: Platform & Ecosystem",
+        "features": {
+            "unified_skills": True,
+            "multi_llm_adapters": True,
+            "plugin_sdk": True
+        }
     }
