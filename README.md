@@ -1,4 +1,158 @@
-# LLM Comparison Scorecard
+# Maestro: AI Executive Assistant
+
+A unified, privacy-first AI platform combining advanced conversational intelligence with deep workflow automation.
+
+## 🚀 Current Status: Phase 1 Implementation
+
+**Phase 1: Local-First Knowledge Core** - Privacy-preserving RAG with Obsidian vault integration
+
+---
+
+## Features
+
+### Maestro AI Assistant (Phase 1)
+- **Privacy-First RAG**: Local-first knowledge base using Ollama for sensitive data
+- **Obsidian Integration**: Deep integration with Obsidian markdown vaults
+- **Graph-Aware Search**: Understands wikilinks, backlinks, and tags
+- **Task Management**: Built-in task tracking and management API
+- **RESTful API**: Complete FastAPI backend with OpenAPI docs
+- **Docker Stack**: Fully containerized with PostgreSQL and Ollama
+- **Multi-LLM Ready**: Architecture prepared for Claude and Gemini integration (Phase 2+)
+
+### Quick Start
+
+```bash
+# 1. Clone and configure
+git clone https://github.com/lordmuffin/Maestro.git
+cd Maestro
+cp .env.example .env
+# Edit .env with your settings (set passwords, API keys)
+
+# 2. Run first-time setup
+chmod +x scripts/setup/first_run.sh
+./scripts/setup/first_run.sh
+
+# 3. (Optional) Initialize Ollama for local LLM
+chmod +x scripts/setup/init_ollama.sh
+./scripts/setup/init_ollama.sh
+
+# 4. Access the system
+# - Open WebUI: http://localhost:3000
+# - API Docs: http://localhost:8000/docs
+# - Health Check: http://localhost:8000/health
+```
+
+### Architecture
+
+Maestro uses a "Tri-Hybrid" architecture:
+- **Data Plane**: Bifurcated local + cloud knowledge base
+- **Intelligence Plane**: LangGraph supervisor with specialized worker agents (Phase 3)
+- **Abstraction Plane**: Unified EA Skills framework (Phase 4)
+
+#### Phase 1 Components
+```
+┌─────────────────────────────────────────┐
+│         Open WebUI Frontend             │
+│      (http://localhost:3000)            │
+└──────────────┬──────────────────────────┘
+               │
+┌──────────────▼──────────────────────────┐
+│      FastAPI Backend (Port 8000)        │
+│  ┌──────────────────────────────────┐   │
+│  │    ObsidianRAG                   │   │
+│  │  (Privacy-Preserving Search)     │   │
+│  └──────────────────────────────────┘   │
+│  ┌──────────────────────────────────┐   │
+│  │    Task Management               │   │
+│  └──────────────────────────────────┘   │
+└──────────────┬──────────────────────────┘
+               │
+    ┌──────────┴──────────┐
+    │                     │
+┌───▼────┐         ┌─────▼──────┐
+│Postgres│         │   Ollama   │
+│Database│         │(Local LLM) │
+└────────┘         └────────────┘
+```
+
+### API Endpoints
+
+#### RAG (Retrieval-Augmented Generation)
+- `POST /api/v1/rag/query` - Query your Obsidian vault
+  ```json
+  {
+    "query": "What are my thoughts on AI?",
+    "similarity_top_k": 5
+  }
+  ```
+- `POST /api/v1/rag/index` - Re-index vault
+- `GET /api/v1/rag/graph/{file_path}` - Get file graph context (backlinks, outlinks, tags)
+- `GET /api/v1/rag/search/tag/{tag}` - Search by tag
+
+#### Task Management
+- `GET /api/v1/tasks` - List all tasks
+- `POST /api/v1/tasks` - Create new task
+- `GET /api/v1/tasks/{id}` - Get specific task
+- `PATCH /api/v1/tasks/{id}` - Update task
+- `DELETE /api/v1/tasks/{id}` - Delete task
+
+#### Health & Status
+- `GET /health` - Basic health check
+- `GET /health/detailed` - Detailed component status
+- `GET /` - API information
+
+### Development Roadmap
+
+- ✅ **Phase 1** (Weeks 1-6): Local-First Knowledge Core
+  - Obsidian RAG integration
+  - Docker infrastructure
+  - Basic API layer
+  - Task management
+  - PostgreSQL database
+
+- 🔄 **Phase 2** (Weeks 7-12): Cloud Knowledge Integration
+  - Google Drive sync
+  - Path mapping service
+  - Hybrid RAG (local + cloud)
+  - Cloud RAG with Gemini
+
+- 📋 **Phase 3** (Weeks 13-18): Multi-LLM Orchestration
+  - LangGraph supervisor agent
+  - Claude/Gemini worker integration
+  - Multi-LLM routing matrix
+  - HITL (Human-in-the-Loop) confirmations
+
+- 📋 **Phase 4** (Weeks 19-24): Platform & Ecosystem
+  - Unified EA Skills framework
+  - Plugin SDK
+  - Skill marketplace
+  - Advanced automation
+
+### Project Structure
+
+```
+maestro/
+├── backend/           # FastAPI backend
+│   ├── core/         # Core modules (RAG, models, database)
+│   ├── api/          # API routes
+│   └── services/     # Business logic services
+├── frontend/         # Open WebUI customizations
+├── infra/            # Docker infrastructure
+│   ├── docker-compose.yml
+│   └── docker/       # Dockerfiles
+├── scripts/          # Setup and utility scripts
+├── data/            # Data directory (gitignored)
+│   └── vault/       # Place your Obsidian vault here
+└── docs/            # Documentation
+```
+
+### License
+
+MIT License - See [LICENSE](LICENSE) file
+
+---
+
+## LLM Comparison Scorecard (Legacy Component)
 
 A comprehensive evaluation framework for comparing LLM models and prompts using automated scoring with Claude as a judge.
 
