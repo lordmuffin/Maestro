@@ -2,22 +2,25 @@
 
 A unified, privacy-first AI platform combining advanced conversational intelligence with deep workflow automation.
 
-## 🚀 Current Status: Phase 1 Implementation
+## 🚀 Current Status: Phase 2 Implementation
 
-**Phase 1: Local-First Knowledge Core** - Privacy-preserving RAG with Obsidian vault integration
+**Phase 2: Cloud Knowledge Integration** - Hybrid RAG combining local privacy with cloud accessibility
 
 ---
 
 ## Features
 
-### Maestro AI Assistant (Phase 1)
+### Maestro AI Assistant (Phase 1 & 2)
 - **Privacy-First RAG**: Local-first knowledge base using Ollama for sensitive data
 - **Obsidian Integration**: Deep integration with Obsidian markdown vaults
 - **Graph-Aware Search**: Understands wikilinks, backlinks, and tags
+- **Cloud Integration**: Google Drive sync and cloud-based RAG with Gemini
+- **Path Mapping Service**: Bidirectional mapping between local and cloud files
+- **Hybrid RAG**: Query both local vault and cloud files seamlessly
 - **Task Management**: Built-in task tracking and management API
 - **RESTful API**: Complete FastAPI backend with OpenAPI docs
 - **Docker Stack**: Fully containerized with PostgreSQL and Ollama
-- **Multi-LLM Ready**: Architecture prepared for Claude and Gemini integration (Phase 2+)
+- **Multi-LLM Ready**: Architecture prepared for Claude orchestration (Phase 3+)
 
 ### Quick Start
 
@@ -77,7 +80,7 @@ Maestro uses a "Tri-Hybrid" architecture:
 
 ### API Endpoints
 
-#### RAG (Retrieval-Augmented Generation)
+#### Local RAG (Retrieval-Augmented Generation)
 - `POST /api/v1/rag/query` - Query your Obsidian vault
   ```json
   {
@@ -88,6 +91,19 @@ Maestro uses a "Tri-Hybrid" architecture:
 - `POST /api/v1/rag/index` - Re-index vault
 - `GET /api/v1/rag/graph/{file_path}` - Get file graph context (backlinks, outlinks, tags)
 - `GET /api/v1/rag/search/tag/{tag}` - Search by tag
+
+#### Cloud RAG (Phase 2)
+- `POST /api/v1/cloud-rag/query` - Query Google Drive files with Gemini
+- `POST /api/v1/cloud-rag/search` - Search Google Drive files
+- `POST /api/v1/cloud-rag/query-files` - Query specific file IDs
+- `GET /api/v1/cloud-rag/status` - Check cloud integration status
+
+#### Path Mapping (Phase 2)
+- `POST /api/v1/path-mapping` - Create/update path mapping
+- `GET /api/v1/path-mapping` - List all mappings
+- `GET /api/v1/path-mapping/resolve/local/{path}` - Resolve local to cloud
+- `GET /api/v1/path-mapping/resolve/cloud/{id}` - Resolve cloud to local
+- `POST /api/v1/path-mapping/sync` - Sync entire vault
 
 #### Task Management
 - `GET /api/v1/tasks` - List all tasks
@@ -110,11 +126,12 @@ Maestro uses a "Tri-Hybrid" architecture:
   - Task management
   - PostgreSQL database
 
-- 🔄 **Phase 2** (Weeks 7-12): Cloud Knowledge Integration
-  - Google Drive sync
+- ✅ **Phase 2** (Weeks 7-12): Cloud Knowledge Integration
+  - Google Drive client integration
   - Path mapping service
   - Hybrid RAG (local + cloud)
   - Cloud RAG with Gemini
+  - Cloud API endpoints
 
 - 📋 **Phase 3** (Weeks 13-18): Multi-LLM Orchestration
   - LangGraph supervisor agent
@@ -135,7 +152,9 @@ maestro/
 ├── backend/           # FastAPI backend
 │   ├── core/         # Core modules (RAG, models, database)
 │   ├── api/          # API routes
-│   └── services/     # Business logic services
+│   ├── services/     # Business logic services (path_mapping, etc.)
+│   ├── integrations/ # External integrations (Google Drive, Gemini)
+│   └── tests/        # Unit and integration tests
 ├── frontend/         # Open WebUI customizations
 ├── infra/            # Docker infrastructure
 │   ├── docker-compose.yml
@@ -143,7 +162,9 @@ maestro/
 ├── scripts/          # Setup and utility scripts
 ├── data/            # Data directory (gitignored)
 │   └── vault/       # Place your Obsidian vault here
+├── credentials/     # API credentials (gitignored)
 └── docs/            # Documentation
+    └── guides/      # User guides and tutorials
 ```
 
 ### License
