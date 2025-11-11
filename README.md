@@ -2,25 +2,28 @@
 
 A unified, privacy-first AI platform combining advanced conversational intelligence with deep workflow automation.
 
-## 🚀 Current Status: Phase 2 Implementation
+## 🚀 Current Status: Phase 4 Implementation
 
-**Phase 2: Cloud Knowledge Integration** - Hybrid RAG combining local privacy with cloud accessibility
+**Phase 4: Platform & Ecosystem** - Unified EA Skills Framework with multi-LLM support
 
 ---
 
 ## Features
 
-### Maestro AI Assistant (Phase 1 & 2)
+### Maestro AI Assistant (Phases 1-4)
 - **Privacy-First RAG**: Local-first knowledge base using Ollama for sensitive data
 - **Obsidian Integration**: Deep integration with Obsidian markdown vaults
 - **Graph-Aware Search**: Understands wikilinks, backlinks, and tags
 - **Cloud Integration**: Google Drive sync and cloud-based RAG with Gemini
 - **Path Mapping Service**: Bidirectional mapping between local and cloud files
 - **Hybrid RAG**: Query both local vault and cloud files seamlessly
+- **Unified EA Skills**: LLM-agnostic skill framework (Phase 4)
+- **Multi-LLM Adapters**: Claude, Gemini, and Ollama support (Phase 4)
+- **Plugin SDK**: Extensible architecture for custom skills (Phase 4)
+- **Open WebUI Pipeline**: Custom pipeline integration (Phase 4)
 - **Task Management**: Built-in task tracking and management API
 - **RESTful API**: Complete FastAPI backend with OpenAPI docs
 - **Docker Stack**: Fully containerized with PostgreSQL and Ollama
-- **Multi-LLM Ready**: Architecture prepared for Claude orchestration (Phase 3+)
 
 ### Quick Start
 
@@ -112,6 +115,29 @@ Maestro uses a "Tri-Hybrid" architecture:
 - `PATCH /api/v1/tasks/{id}` - Update task
 - `DELETE /api/v1/tasks/{id}` - Delete task
 
+#### Skills Framework (Phase 4)
+- `GET /api/v1/skills/skills` - List all available skills
+- `GET /api/v1/skills/skills/{name}` - Get skill details
+- `POST /api/v1/skills/execute` - Execute a skill
+  ```json
+  {
+    "skill_name": "search_knowledge_base",
+    "parameters": {
+      "query": "project updates",
+      "max_results": 5
+    }
+  }
+  ```
+- `GET /api/v1/skills/tools/{provider}` - Get tool schemas for LLM (claude, gemini, ollama)
+- `GET /api/v1/skills/categories` - List skill categories
+- `GET /api/v1/skills/stats` - Get skill statistics
+
+#### Built-in Skills (Phase 4)
+- **generate_weekly_review** - Create comprehensive weekly summaries
+- **search_knowledge_base** - Semantic search across Obsidian vault
+- **extract_tasks** - Extract actionable tasks from notes
+- **generate_project_synthesis** - Generate project overviews
+
 #### Health & Status
 - `GET /health` - Basic health check
 - `GET /health/detailed` - Detailed component status
@@ -139,11 +165,12 @@ Maestro uses a "Tri-Hybrid" architecture:
   - Multi-LLM routing matrix
   - HITL (Human-in-the-Loop) confirmations
 
-- 📋 **Phase 4** (Weeks 19-24): Platform & Ecosystem
+- ✅ **Phase 4** (Weeks 19-24): Platform & Ecosystem
   - Unified EA Skills framework
-  - Plugin SDK
-  - Skill marketplace
-  - Advanced automation
+  - Multi-LLM adapters (Claude, Gemini, Ollama)
+  - Plugin SDK & documentation
+  - Open WebUI pipeline integration
+  - Built-in skills (weekly review, search, tasks, synthesis)
 
 ### Project Structure
 
