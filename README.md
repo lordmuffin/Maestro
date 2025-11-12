@@ -27,6 +27,8 @@ A unified, privacy-first AI platform combining advanced conversational intellige
 
 ### Quick Start
 
+#### Linux/macOS
+
 ```bash
 # 1. Clone and configure
 git clone https://github.com/lordmuffin/Maestro.git
@@ -36,10 +38,7 @@ cp .env.example .env
 
 # 2. Configure your Obsidian vault path (recommended)
 # In .env, set LOCAL_OBSIDIAN_PATH to your existing vault location
-# Examples:
-#   Windows: LOCAL_OBSIDIAN_PATH=C:/Users/YourName/Documents/ObsidianVault
-#   Linux:   LOCAL_OBSIDIAN_PATH=/home/yourname/Documents/ObsidianVault
-#   macOS:   LOCAL_OBSIDIAN_PATH=/Users/yourname/Documents/ObsidianVault
+# Example: LOCAL_OBSIDIAN_PATH=/home/yourname/Documents/ObsidianVault
 
 # 3. Run first-time setup
 chmod +x scripts/setup/first_run.sh
@@ -54,6 +53,39 @@ chmod +x scripts/setup/init_ollama.sh
 # - API Docs: http://localhost:8000/docs
 # - Health Check: http://localhost:8000/health
 ```
+
+#### Windows (PowerShell)
+
+```powershell
+# 1. Clone and configure
+git clone https://github.com/lordmuffin/Maestro.git
+cd Maestro
+Copy-Item .env.example .env
+# Edit .env with your settings (set passwords, API keys, directory paths)
+# Use notepad or your preferred editor: notepad .env
+
+# 2. Configure your Obsidian vault path (recommended)
+# In .env, set LOCAL_OBSIDIAN_PATH to your existing vault location
+# Example: LOCAL_OBSIDIAN_PATH=C:/Users/YourName/Documents/ObsidianVault
+# Note: Use forward slashes (/) in the path, not backslashes (\)
+
+# 3. Run first-time setup
+powershell -ExecutionPolicy Bypass -File .\scripts\setup\first_run.ps1
+# If first_run.ps1 doesn't exist, use WSL or Git Bash to run:
+# bash ./scripts/setup/first_run.sh
+
+# 4. (Optional) Initialize Ollama for local LLM
+powershell -ExecutionPolicy Bypass -File .\scripts\setup\init_ollama.ps1
+# If init_ollama.ps1 doesn't exist, use WSL or Git Bash to run:
+# bash ./scripts/setup/init_ollama.sh
+
+# 5. Access the system
+# - Open WebUI: http://localhost:3000
+# - API Docs: http://localhost:8000/docs
+# - Health Check: http://localhost:8000/health
+```
+
+**Note for Windows users**: If PowerShell scripts (.ps1) are not available, you can use Windows Subsystem for Linux (WSL) or Git Bash to run the bash scripts (.sh) instead.
 
 ### Obsidian Vault Configuration
 
