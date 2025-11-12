@@ -32,25 +32,58 @@ A unified, privacy-first AI platform combining advanced conversational intellige
 git clone https://github.com/lordmuffin/Maestro.git
 cd Maestro
 cp .env.example .env
-# Edit .env with your settings (set passwords, API keys)
+# Edit .env with your settings (set passwords, API keys, directory paths)
 
-# 2. Run first-time setup
+# 2. Configure your Obsidian vault path (recommended)
+# In .env, set LOCAL_OBSIDIAN_PATH to your existing vault location
+# Examples:
+#   Windows: LOCAL_OBSIDIAN_PATH=C:/Users/YourName/Documents/ObsidianVault
+#   Linux:   LOCAL_OBSIDIAN_PATH=/home/yourname/Documents/ObsidianVault
+#   macOS:   LOCAL_OBSIDIAN_PATH=/Users/yourname/Documents/ObsidianVault
+
+# 3. Run first-time setup
 chmod +x scripts/setup/first_run.sh
 ./scripts/setup/first_run.sh
 
-# 3. (Optional) Initialize Ollama for local LLM
+# 4. (Optional) Initialize Ollama for local LLM
 chmod +x scripts/setup/init_ollama.sh
 ./scripts/setup/init_ollama.sh
 
-# 4. Access the system
+# 5. Access the system
 # - Open WebUI: http://localhost:3000
 # - API Docs: http://localhost:8000/docs
 # - Health Check: http://localhost:8000/health
 ```
 
-### Google Drive Integration (Optional)
+### Obsidian Vault Configuration
 
-To enable Google Drive sync and cloud-based RAG with Gemini, configure the following environment variables in your `.env` file:
+Maestro can directly access your existing Obsidian vault on your local file system. This is the **recommended approach** for most users.
+
+#### Configure Local Vault Path (Recommended)
+
+Edit your `.env` file and set the `LOCAL_OBSIDIAN_PATH` variable to point to your vault directory:
+
+```bash
+# Local Obsidian Vault Path (Host System)
+LOCAL_OBSIDIAN_PATH=/path/to/your/obsidian/vault
+
+# Examples for different operating systems:
+# Windows:
+#   LOCAL_OBSIDIAN_PATH=C:/Users/YourName/Documents/ObsidianVault
+# Linux:
+#   LOCAL_OBSIDIAN_PATH=/home/yourname/Documents/ObsidianVault
+# macOS:
+#   LOCAL_OBSIDIAN_PATH=/Users/yourname/Documents/ObsidianVault
+```
+
+**Benefits:**
+- Direct access to your existing vault (no copying required)
+- Changes are immediately visible to Maestro
+- Works with any cloud sync solution you may use (Google Drive, Dropbox, OneDrive, Syncthing, etc.)
+
+### Google Drive API Integration (Optional)
+
+For advanced use cases, you can also enable Google Drive API integration for cloud-based RAG with Gemini. Configure the following environment variables in your `.env` file:
 
 #### Required Environment Variables
 

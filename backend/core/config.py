@@ -45,9 +45,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = 24
     
-    # Paths
+    # Paths (container paths)
     obsidian_vault_path: str = "/app/data/vault"
     gdrive_sync_path: str = "/app/data/gdrive-sync"
+
+    # Local host path (for setup scripts and volume mounting)
+    local_obsidian_path: Optional[str] = None
     
     # Feature Flags
     enable_proactive_suggestions: bool = True
