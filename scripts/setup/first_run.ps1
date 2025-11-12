@@ -112,12 +112,110 @@ if (-Not $dockerComposeCmd) {
     exit 1
 }
 
+# Function to try pulling Open WebUI image with fallback
+function Try-Pull-OpenWebUI {
+    $primaryImage = "ghcr.io/open-webui/open-webui:main"
+    $fallbackImage = "backplane/open-webui:main"
+
+    # Check if Open WebUI is explicitly disabled
+    if (Select-String -Path ".env" -Pattern "^OPENWEBUI_ENABLED=false" -Quiet) {
+        Write-Host ""
+        Write-Host "ℹ️  Open WebUI is disabled (OPENWEBUI_ENABLED=false)" -ForegroundColor Yellow
+        Write-Host "   Skipping Open WebUI image pull"
+
+        # Set profile to disabled if not already set
+        if (-Not (Select-String -Path ".env" -Pattern "^OPENWEBUI_PROFILE=" -Quiet)) {
+            Add-Content -Path ".env" -Value "OPENWEBUI_PROFILE=disabled"
+        }
+
+        return $true
+    }
+
+    Write-Host ""
+    Write-Host "====================================" -ForegroundColor Cyan
+    Write-Host "Pulling Open WebUI Image" -ForegroundColor Cyan
+    Write-Host "====================================" -ForegroundColor Cyan
+    Write-Host "📦 Attempting to pull: $primaryImage"
+    Write-Host ""
+
+    # Try primary (GHCR)
+    $ghcrResult = docker pull $primaryImage 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ Successfully pulled from GitHub Container Registry" -ForegroundColor Green
+        return $true
+    }
+
+    Write-Host "⚠️  Failed to pull from GHCR (authentication may be required)" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "🔄 Trying fallback mirror: $fallbackImage" -ForegroundColor Cyan
+    Write-Host "   (Unofficial automated mirror from Docker Hub)"
+
+    # Try fallback (Docker Hub mirror)
+    $fallbackResult = docker pull $fallbackImage 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ Successfully pulled from Docker Hub mirror" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "ℹ️  Note: Using community-maintained mirror (backplane/open-webui)" -ForegroundColor Yellow
+        Write-Host "   This is an automated daily sync from the official GHCR repository"
+        Write-Host "   To use official image, authenticate with GHCR:"
+        Write-Host "   docker login ghcr.io -u YOUR_GITHUB_USERNAME"
+        Write-Host ""
+
+        # Tag fallback as primary image so docker-compose uses it
+        docker tag $fallbackImage $primaryImage
+        return $true
+    }
+
+    Write-Host "❌ Failed to pull from Docker Hub mirror" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "⚠️  WARNING: Could not automatically pull Open WebUI image" -ForegroundColor Red
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Options to resolve:"
+    Write-Host ""
+    Write-Host "1. Authenticate with GitHub Container Registry (RECOMMENDED):"
+    Write-Host "   docker login ghcr.io -u YOUR_GITHUB_USERNAME"
+    Write-Host "   (Use a GitHub Personal Access Token with 'read:packages' scope)"
+    Write-Host "   Then run this script again"
+    Write-Host ""
+    Write-Host "2. Continue without Open WebUI (use API only):"
+    Write-Host "   Add 'OPENWEBUI_ENABLED=false' to your .env file"
+    Write-Host ""
+    Write-Host "3. Manual pull and retry:"
+    Write-Host "   Try pulling manually, then run this script again"
+    Write-Host ""
+
+    # Ask user if they want to continue without Open WebUI
+    $response = Read-Host "Continue setup without Open WebUI? (Y/n)"
+    if ($response -match "^[Nn]$") {
+        Write-Host ""
+        Write-Host "Setup cancelled. Please resolve the image issue and try again." -ForegroundColor Yellow
+        Write-Host "See documentation for detailed troubleshooting."
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Host "⚠️  Continuing without Open WebUI..." -ForegroundColor Yellow
+    Write-Host "   Adding OPENWEBUI_ENABLED=false to .env"
+    Write-Host ""
+    Add-Content -Path ".env" -Value "`nOPENWEBUI_ENABLED=false"
+    Add-Content -Path ".env" -Value "OPENWEBUI_PROFILE=disabled"
+    return $true
+}
+
+# Try to pull Open WebUI with fallback logic
+Try-Pull-OpenWebUI | Out-Null
+
 # Navigate to infra directory
 Push-Location infra
 
 try {
     # Start containers
-    Write-Host "Starting Docker containers..." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "====================================" -ForegroundColor Cyan
+    Write-Host "Starting Docker Containers" -ForegroundColor Cyan
+    Write-Host "====================================" -ForegroundColor Cyan
     if ($dockerComposeCmd -eq "docker-compose") {
         docker-compose up -d
     } else {
