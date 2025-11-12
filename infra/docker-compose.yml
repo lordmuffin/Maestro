@@ -53,11 +53,15 @@ services:
       - OLLAMA_HOST=${OLLAMA_HOST}
       - OLLAMA_MODEL=${OLLAMA_MODEL}
       - OBSIDIAN_VAULT_PATH=${OBSIDIAN_VAULT_PATH}
+      - GDRIVE_SYNC_PATH=${GDRIVE_SYNC_PATH}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+      - GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID}
       - LOG_LEVEL=${LOG_LEVEL}
     volumes:
       - ../backend:/app
-      - vault_data:/app/data/vault:ro
-      - credentials:/app/credentials:ro
+      - ${LOCAL_OBSIDIAN_PATH:-../data/vault}:/app/data/vault:ro
+      - ${GOOGLE_APPLICATION_CREDENTIALS:-../credentials}:/app/credentials:ro
     ports:
       - "8000:8000"
     depends_on:
@@ -99,5 +103,3 @@ volumes:
   postgres_data:
   ollama_data:
   openwebui_data:
-  vault_data:
-  credentials:

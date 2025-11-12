@@ -15,7 +15,10 @@ if [ ! -f .env ]; then
     echo "  - JWT_SECRET"
     echo "  - WEBUI_SECRET_KEY"
     echo ""
-    echo "For Google Drive integration (optional), also configure:"
+    echo "To use your existing Obsidian vault:"
+    echo "  - LOCAL_OBSIDIAN_PATH (path to your Obsidian vault directory)"
+    echo ""
+    echo "For Google Drive API integration (optional), also configure:"
     echo "  - GOOGLE_CLOUD_PROJECT"
     echo "  - GOOGLE_APPLICATION_CREDENTIALS"
     echo "  - GOOGLE_DRIVE_FOLDER_ID"
@@ -26,16 +29,34 @@ fi
 # Load environment variables
 source .env
 
-# Create necessary directories
-echo "Creating data directories..."
-mkdir -p data/vault
+# Create necessary directories based on configuration
+echo "Setting up directories..."
+
+# Handle Obsidian vault path
+if [ -n "$LOCAL_OBSIDIAN_PATH" ]; then
+    echo "✓ Using local Obsidian vault at: $LOCAL_OBSIDIAN_PATH"
+    if [ ! -d "$LOCAL_OBSIDIAN_PATH" ]; then
+        echo "⚠️  Warning: LOCAL_OBSIDIAN_PATH does not exist: $LOCAL_OBSIDIAN_PATH"
+        echo "   Please create this directory or update LOCAL_OBSIDIAN_PATH in .env"
+    fi
+else
+    echo "Creating default data directories..."
+    mkdir -p data/vault
+    echo "✓ Default vault directory created at ./data/vault"
+fi
+
+# Create storage directory
 mkdir -p data/storage
 
-# Create Google Drive sync directory if Google Drive is configured
+# Create gdrive-sync directory if Google Drive API is configured
 if [ -n "$GOOGLE_DRIVE_FOLDER_ID" ] && [ "$GOOGLE_DRIVE_FOLDER_ID" != "your-drive-folder-id" ]; then
-    echo "Google Drive integration detected..."
+    echo "Google Drive API integration detected..."
     mkdir -p data/gdrive-sync
+    echo "✓ Google Drive sync directory created at ./data/gdrive-sync"
+fi
 
+# Validate Google Drive API credentials if configured
+if [ -n "$GOOGLE_DRIVE_FOLDER_ID" ] && [ "$GOOGLE_DRIVE_FOLDER_ID" != "your-drive-folder-id" ]; then
     # Check for Google credentials file
     if [ -n "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
         CREDS_FILE="${GOOGLE_APPLICATION_CREDENTIALS#/app/}"
@@ -55,10 +76,6 @@ if [ -n "$GOOGLE_DRIVE_FOLDER_ID" ] && [ "$GOOGLE_DRIVE_FOLDER_ID" != "your-driv
     if [ -z "$GOOGLE_API_KEY" ] && [ -z "$GOOGLE_GEMINI_API_KEY" ]; then
         echo "⚠️  Warning: Neither GOOGLE_API_KEY nor GOOGLE_GEMINI_API_KEY configured in .env"
     fi
-
-    echo "✓ Google Drive sync directory created"
-else
-    echo "Google Drive integration not configured (skipping gdrive-sync directory)"
 fi
 
 mkdir -p credentials
@@ -83,7 +100,12 @@ sleep 15
 echo "=== Setup complete! ==="
 echo ""
 echo "Next steps:"
-echo "1. Place your Obsidian vault in ./data/vault/"
+if [ -n "$LOCAL_OBSIDIAN_PATH" ]; then
+    echo "1. Obsidian vault configured at: $LOCAL_OBSIDIAN_PATH"
+else
+    echo "1. Place your Obsidian vault in ./data/vault/"
+    echo "   Or set LOCAL_OBSIDIAN_PATH in .env to use an existing vault"
+fi
 echo "2. Access Open WebUI at http://localhost:3000"
 echo "3. Access API docs at http://localhost:8000/docs"
 echo "4. Check health status at http://localhost:8000/health"
