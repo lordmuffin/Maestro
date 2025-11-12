@@ -14,14 +14,53 @@ if [ ! -f .env ]; then
     echo "  - POSTGRES_PASSWORD"
     echo "  - JWT_SECRET"
     echo "  - WEBUI_SECRET_KEY"
+    echo ""
+    echo "For Google Drive integration (optional), also configure:"
+    echo "  - GOOGLE_CLOUD_PROJECT"
+    echo "  - GOOGLE_APPLICATION_CREDENTIALS"
+    echo "  - GOOGLE_DRIVE_FOLDER_ID"
+    echo "  - GOOGLE_API_KEY or GOOGLE_GEMINI_API_KEY"
     exit 1
 fi
+
+# Load environment variables
+source .env
 
 # Create necessary directories
 echo "Creating data directories..."
 mkdir -p data/vault
-mkdir -p data/gdrive-sync
 mkdir -p data/storage
+
+# Create Google Drive sync directory if Google Drive is configured
+if [ -n "$GOOGLE_DRIVE_FOLDER_ID" ] && [ "$GOOGLE_DRIVE_FOLDER_ID" != "your-drive-folder-id" ]; then
+    echo "Google Drive integration detected..."
+    mkdir -p data/gdrive-sync
+
+    # Check for Google credentials file
+    if [ -n "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+        CREDS_FILE="${GOOGLE_APPLICATION_CREDENTIALS#/app/}"
+        if [ ! -f "$CREDS_FILE" ]; then
+            echo "⚠️  Warning: GOOGLE_APPLICATION_CREDENTIALS set but file not found: $CREDS_FILE"
+            echo "   Please place your Google Cloud credentials JSON file at: $CREDS_FILE"
+        else
+            echo "✓ Google Cloud credentials file found"
+        fi
+    fi
+
+    # Validate required Google Drive environment variables
+    if [ -z "$GOOGLE_CLOUD_PROJECT" ] || [ "$GOOGLE_CLOUD_PROJECT" = "your-project-id" ]; then
+        echo "⚠️  Warning: GOOGLE_CLOUD_PROJECT not configured in .env"
+    fi
+
+    if [ -z "$GOOGLE_API_KEY" ] && [ -z "$GOOGLE_GEMINI_API_KEY" ]; then
+        echo "⚠️  Warning: Neither GOOGLE_API_KEY nor GOOGLE_GEMINI_API_KEY configured in .env"
+    fi
+
+    echo "✓ Google Drive sync directory created"
+else
+    echo "Google Drive integration not configured (skipping gdrive-sync directory)"
+fi
+
 mkdir -p credentials
 
 # Check if docker-compose exists
