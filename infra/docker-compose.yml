@@ -80,13 +80,13 @@ services:
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
       - OLLAMA_BASE_URL=${OLLAMA_HOST}
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      - ENABLE_SIGNUP=true
-      - WEBUI_NAME=Maestro AI Assistant
+      - ENABLE_SIGNUP=${ENABLE_SIGNUP:-true}
+      - WEBUI_NAME=${WEBUI_NAME:-Maestro AI Assistant}
     volumes:
       - openwebui_data:/app/backend/data
       - ../frontend/open-webui-customizations:/app/backend/data/customizations
     ports:
-      - "${WEBUI_PORT}:8080"
+      - "${WEBUI_PORT:-3000}:8080"
     depends_on:
       - postgres
       - ollama
@@ -94,6 +94,11 @@ services:
     networks:
       - maestro-network
     restart: unless-stopped
+    # Use profiles to allow conditional enabling/disabling
+    # If OPENWEBUI_ENABLED=false in .env, add this service to 'disabled' profile
+    # Otherwise, it runs by default (empty profile list = always runs)
+    profiles:
+      - ${OPENWEBUI_PROFILE:-}
 
 networks:
   maestro-network:

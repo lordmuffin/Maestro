@@ -86,14 +86,112 @@ if ! command -v docker-compose &> /dev/null; then
     exit 1
 fi
 
+# Function to try pulling Open WebUI image with fallback
+try_pull_openwebui() {
+  local primary_image="ghcr.io/open-webui/open-webui:main"
+  local fallback_image="backplane/open-webui:main"
+
+  # Check if Open WebUI is explicitly disabled
+  if grep -q "^OPENWEBUI_ENABLED=false" .env 2>/dev/null; then
+    echo "ℹ️  Open WebUI is disabled (OPENWEBUI_ENABLED=false)"
+    echo "   Skipping Open WebUI image pull"
+
+    # Set profile to disabled if not already set
+    if ! grep -q "^OPENWEBUI_PROFILE=" .env 2>/dev/null; then
+      echo "OPENWEBUI_PROFILE=disabled" >> .env
+    fi
+
+    return 0
+  fi
+
+  echo ""
+  echo "===================================="
+  echo "Pulling Open WebUI Image"
+  echo "===================================="
+  echo "📦 Attempting to pull: $primary_image"
+  echo ""
+
+  # Try primary (GHCR)
+  if docker pull "$primary_image" 2>/dev/null; then
+    echo "✅ Successfully pulled from GitHub Container Registry"
+    return 0
+  fi
+
+  echo "⚠️  Failed to pull from GHCR (authentication may be required)"
+  echo ""
+  echo "🔄 Trying fallback mirror: $fallback_image"
+  echo "   (Unofficial automated mirror from Docker Hub)"
+
+  # Try fallback (Docker Hub mirror)
+  if docker pull "$fallback_image" 2>/dev/null; then
+    echo "✅ Successfully pulled from Docker Hub mirror"
+    echo ""
+    echo "ℹ️  Note: Using community-maintained mirror (backplane/open-webui)"
+    echo "   This is an automated daily sync from the official GHCR repository"
+    echo "   To use official image, authenticate with GHCR:"
+    echo "   docker login ghcr.io -u YOUR_GITHUB_USERNAME"
+    echo ""
+
+    # Tag fallback as primary image so docker-compose uses it
+    docker tag "$fallback_image" "$primary_image"
+    return 0
+  fi
+
+  echo "❌ Failed to pull from Docker Hub mirror"
+  echo ""
+  echo "═══════════════════════════════════════════════════════════════"
+  echo "⚠️  WARNING: Could not automatically pull Open WebUI image"
+  echo "═══════════════════════════════════════════════════════════════"
+  echo ""
+  echo "Options to resolve:"
+  echo ""
+  echo "1. Authenticate with GitHub Container Registry (RECOMMENDED):"
+  echo "   docker login ghcr.io -u YOUR_GITHUB_USERNAME"
+  echo "   (Use a GitHub Personal Access Token with 'read:packages' scope)"
+  echo "   Then run this script again"
+  echo ""
+  echo "2. Continue without Open WebUI (use API only):"
+  echo "   Add 'OPENWEBUI_ENABLED=false' to your .env file"
+  echo ""
+  echo "3. Manual pull and retry:"
+  echo "   Try pulling manually, then run this script again"
+  echo ""
+
+  # Ask user if they want to continue without Open WebUI
+  read -p "Continue setup without Open WebUI? (Y/n): " response
+  if [[ "$response" =~ ^[Nn]$ ]]; then
+    echo ""
+    echo "Setup cancelled. Please resolve the image issue and try again."
+    echo "See documentation for detailed troubleshooting."
+    exit 1
+  fi
+
+  echo ""
+  echo "⚠️  Continuing without Open WebUI..."
+  echo "   Adding OPENWEBUI_ENABLED=false to .env"
+  echo ""
+  echo "OPENWEBUI_ENABLED=false" >> .env
+  echo "OPENWEBUI_PROFILE=disabled" >> .env
+  return 0
+}
+
 # Navigate to infra directory
 cd infra
 
+# Try to pull Open WebUI with fallback logic
+cd ..
+try_pull_openwebui
+cd infra
+
 # Start containers
-echo "Starting Docker containers..."
+echo ""
+echo "===================================="
+echo "Starting Docker Containers"
+echo "===================================="
 docker-compose up -d
 
 # Wait for services
+echo ""
 echo "Waiting for services to be ready..."
 sleep 15
 
