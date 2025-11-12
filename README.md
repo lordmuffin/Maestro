@@ -48,6 +48,68 @@ chmod +x scripts/setup/init_ollama.sh
 # - Health Check: http://localhost:8000/health
 ```
 
+### Google Drive Integration (Optional)
+
+To enable Google Drive sync and cloud-based RAG with Gemini, configure the following environment variables in your `.env` file:
+
+#### Required Environment Variables
+
+```bash
+# Google Cloud Project Configuration
+GOOGLE_CLOUD_PROJECT=your-actual-project-id
+GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/google-credentials.json
+GOOGLE_DRIVE_FOLDER_ID=your-actual-drive-folder-id
+
+# Google API Key (for Gemini)
+GOOGLE_API_KEY=your-google-api-key
+# OR
+GOOGLE_GEMINI_API_KEY=your-gemini-api-key
+```
+
+#### Setup Steps
+
+1. **Create a Google Cloud Project**
+   - Visit [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project or select an existing one
+   - Note your project ID
+
+2. **Enable Google Drive API**
+   - In your Google Cloud project, enable the Google Drive API
+   - Navigate to "APIs & Services" > "Enable APIs and Services"
+   - Search for "Google Drive API" and enable it
+
+3. **Create Service Account Credentials**
+   - Go to "APIs & Services" > "Credentials"
+   - Click "Create Credentials" > "Service Account"
+   - Download the JSON key file
+   - Place it in `credentials/google-credentials.json` (relative to project root)
+
+4. **Get Google Drive Folder ID**
+   - Create or select a folder in Google Drive
+   - Share the folder with your service account email (found in the credentials JSON)
+   - Copy the folder ID from the URL: `https://drive.google.com/drive/folders/FOLDER_ID_HERE`
+
+5. **Get Google API Key** (for Gemini)
+   - Visit [Google AI Studio](https://aistudio.google.com/app/apikey)
+   - Create or copy your API key
+   - Add it to your `.env` file
+
+6. **Run First-Time Setup**
+   - The `first_run.sh` script will automatically detect your Google Drive configuration
+   - It will create the necessary directories and validate your credentials
+   - Warnings will be displayed if any configuration is missing
+
+```bash
+./scripts/setup/first_run.sh
+```
+
+#### Path Mapping
+
+Maestro automatically maintains a bidirectional mapping between your local Obsidian vault and Google Drive files. Use the Path Mapping API endpoints to:
+- Sync your entire vault: `POST /api/v1/path-mapping/sync`
+- Resolve local to cloud paths: `GET /api/v1/path-mapping/resolve/local/{path}`
+- Resolve cloud to local paths: `GET /api/v1/path-mapping/resolve/cloud/{id}`
+
 ### Architecture
 
 Maestro uses a "Tri-Hybrid" architecture:
