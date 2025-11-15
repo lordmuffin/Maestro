@@ -1,6 +1,47 @@
 version: '3.8'
 
 services:
+  mcpo:
+    image: ghcr.io/open-webui/mcpo:main
+    container_name: mcpo-multi
+    ports:
+      - "8002:8002"
+    volumes:
+      - ../config:/config:ro
+      - mcpo-sandbox:/app/sandbox
+    command: >
+      mcpo --host 0.0.0.0 --port 8002
+      --api-key "${MCPO_API_KEY:-mcpo-secret-key}"
+      --config /config/multi-server.json
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - maestro-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:-changeme}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - maestro-network
+
   postgres:
     image: postgres:16-alpine
     container_name: maestro-postgres
@@ -21,27 +62,27 @@ services:
       timeout: 5s
       retries: 5
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: maestro-ollama
-    volumes:
-      - ollama_data:/root/.ollama
-    ports:
-      - "11434:11434"
-    networks:
-      - maestro-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: ${OLLAMA_NUM_GPU:-0}
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: maestro-ollama
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   ports:
+  #     - "11435:11434"
+  #   networks:
+  #     - maestro-network
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: ${OLLAMA_NUM_GPU:-0}
+  #             capabilities: [gpu]
+  #   healthcheck:
+  #     test: ["CMD", "ollama", "list"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
   backend:
     build:
@@ -63,15 +104,13 @@ services:
       - ${LOCAL_OBSIDIAN_PATH:-../data/vault}:/app/data/vault:ro
       - ${GOOGLE_APPLICATION_CREDENTIALS:-../credentials}:/app/credentials:ro
     ports:
-      - "8000:8000"
+      - "8001:8001"
     depends_on:
       postgres:
         condition: service_healthy
-      ollama:
-        condition: service_healthy
     networks:
       - maestro-network
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8001 --reload
 
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
@@ -89,7 +128,7 @@ services:
       - "${WEBUI_PORT:-3000}:8080"
     depends_on:
       - postgres
-      - ollama
+      # - ollama
       - backend
     networks:
       - maestro-network
@@ -108,3 +147,5 @@ volumes:
   postgres_data:
   ollama_data:
   openwebui_data:
+  redis-data:
+  mcpo-sandbox:
