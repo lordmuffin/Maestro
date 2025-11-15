@@ -1,0 +1,132 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openwebui
+  namespace: maestro
+  labels:
+    app: openwebui
+    component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openwebui
+  template:
+    metadata:
+      labels:
+        app: openwebui
+        component: frontend
+    spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:16-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h postgres -p 5432 -U $POSTGRES_USER; do
+            echo "Waiting for postgres..."
+            sleep 2
+          done
+          echo "Postgres is ready!"
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: maestro-secrets
+              key: POSTGRES_USER
+      containers:
+      - name: openwebui
+        image: ghcr.io/open-webui/open-webui:main
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # WebUI secret key
+        - name: WEBUI_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: maestro-secrets
+              key: WEBUI_SECRET_KEY
+
+        # Ollama configuration
+        - name: OLLAMA_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: maestro-config
+              key: OLLAMA_HOST
+
+        # Database URL (constructed from secrets)
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: maestro-secrets
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: maestro-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: maestro-secrets
+              key: POSTGRES_DB
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)"
+
+        # WebUI configuration
+        - name: ENABLE_SIGNUP
+          valueFrom:
+            configMapKeyRef:
+              name: maestro-config
+              key: ENABLE_SIGNUP
+        - name: WEBUI_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: maestro-config
+              key: WEBUI_NAME
+
+        volumeMounts:
+        - name: webui-data
+          mountPath: /app/backend/data
+        # Uncomment if you have custom frontend files
+        # - name: customizations
+        #   mountPath: /app/backend/data/customizations
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+      volumes:
+      - name: webui-data
+        persistentVolumeClaim:
+          claimName: openwebui-data
+      # Uncomment and configure if you have custom frontend files:
+      # - name: customizations
+      #   hostPath:
+      #     path: /path/to/frontend/open-webui-customizations
+      #     type: Directory

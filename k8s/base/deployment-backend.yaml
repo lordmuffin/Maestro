@@ -1,0 +1,169 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: maestro
+  labels:
+    app: backend
+    component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        component: api
+    spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:16-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h postgres -p 5432 -U $POSTGRES_USER; do
+            echo "Waiting for postgres..."
+            sleep 2
+          done
+          echo "Postgres is ready!"
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: maestro-secrets
+              key: POSTGRES_USER
+      containers:
+      - name: backend
+        image: maestro-backend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8001
+          name: http
+        command:
+        - uvicorn
+        - api.main:app
+        - --host
+        - "0.0.0.0"
+        - --port
+        - "8001"
+        - --reload
+        env:
+        # Database configuration
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: maestro-config
+              key: DATABASE_URL
+
+        # Ollama configuration
+        - name: OLLAMA_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: maestro-config
+              key: OLLAMA_HOST
+        - name: OLLAMA_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: maestro-config
+              key: OLLAMA_MODEL
+
+        # Path configuration
+        - name: OBSIDIAN_VAULT_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: maestro-config
+              key: OBSIDIAN_VAULT_PATH
+        - name: GDRIVE_SYNC_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: maestro-config
+              key: GDRIVE_SYNC_PATH
+
+        # Google Cloud configuration
+        - name: GOOGLE_CLOUD_PROJECT
+          valueFrom:
+            secretKeyRef:
+              name: maestro-secrets
+              key: GOOGLE_CLOUD_PROJECT
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          valueFrom:
+            configMapKeyRef:
+              name: maestro-config
+              key: GOOGLE_APPLICATION_CREDENTIALS
+        - name: GOOGLE_DRIVE_FOLDER_ID
+          valueFrom:
+            secretKeyRef:
+              name: maestro-secrets
+              key: GOOGLE_DRIVE_FOLDER_ID
+
+        # Logging
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: maestro-config
+              key: LOG_LEVEL
+
+        volumeMounts:
+        # Note: These volumes need to be configured based on your storage setup
+        # Option 1: Use hostPath for development
+        # Option 2: Use NFS or other shared storage for production
+        # Option 3: Use PVCs (commented out in pvcs.yaml)
+
+        # Uncomment and configure based on your storage strategy:
+        # - name: vault-data
+        #   mountPath: /app/data/vault
+        #   readOnly: true
+        # - name: credentials
+        #   mountPath: /app/credentials
+        #   readOnly: true
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+      volumes:
+      # Configure these volumes based on your storage strategy
+      # Example using hostPath (NOT recommended for production):
+      # - name: vault-data
+      #   hostPath:
+      #     path: /path/to/obsidian/vault
+      #     type: Directory
+      # - name: credentials
+      #   hostPath:
+      #     path: /path/to/credentials
+      #     type: Directory
+
+      # Example using NFS (recommended for production):
+      # - name: vault-data
+      #   nfs:
+      #     server: your-nfs-server
+      #     path: /exports/obsidian-vault
+      # - name: credentials
+      #   secret:
+      #     secretName: google-credentials
