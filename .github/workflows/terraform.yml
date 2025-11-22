@@ -59,8 +59,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }} #'projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_ID/providers/PROVIDER_ID'
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }} #'your-service-account@your-project.iam.gserviceaccount.com'
 
       # Alternative: Using Service Account Key (less secure, commented out)
       # Uncomment this section and comment out the Workload Identity section above if needed
@@ -84,6 +84,22 @@ jobs:
       - name: Terraform Validate
         id: validate
         run: terraform validate -no-color
+
+      - name: Validate Required Secrets
+        run: |
+          if [ -z "${{ secrets.GCP_PROJECT_ID }}" ]; then
+            echo "::error::GCP_PROJECT_ID secret is not set. Please configure it in Settings -> Environments -> project-maestro-gcp"
+            exit 1
+          fi
+          if [ -z "${{ secrets.GH_TOKEN }}" ]; then
+            echo "::error::GH_TOKEN secret is not set. Please configure it in Settings -> Environments -> project-maestro-gcp"
+            exit 1
+          fi
+          if [ -z "${{ secrets.REPO_NAME }}" ]; then
+            echo "::error::REPO_NAME secret is not set. Please configure it in Settings -> Environments -> project-maestro-gcp"
+            exit 1
+          fi
+          echo "All required secrets are configured"
 
       - name: Terraform Plan
         id: plan
