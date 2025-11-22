@@ -18,35 +18,59 @@ provider "google" {
   region  = var.region
 }
 
-# Enable required APIs
+# Enable required APIs - Service Usage API must be enabled first
+resource "google_project_service" "service_usage" {
+  service            = "serviceusage.googleapis.com"
+  disable_on_destroy = false
+}
+
 resource "google_project_service" "cloud_functions" {
   service            = "cloudfunctions.googleapis.com"
   disable_on_destroy = false
+  
+  depends_on = [google_project_service.service_usage]
 }
 
 resource "google_project_service" "cloud_build" {
   service            = "cloudbuild.googleapis.com"
   disable_on_destroy = false
+  
+  depends_on = [google_project_service.service_usage]
 }
 
 resource "google_project_service" "firestore" {
   service            = "firestore.googleapis.com"
   disable_on_destroy = false
+  
+  depends_on = [google_project_service.service_usage]
 }
 
 resource "google_project_service" "aiplatform" {
   service            = "aiplatform.googleapis.com"
   disable_on_destroy = false
+  
+  depends_on = [google_project_service.service_usage]
 }
 
 resource "google_project_service" "chat" {
   service            = "chat.googleapis.com"
   disable_on_destroy = false
+  
+  depends_on = [google_project_service.service_usage]
 }
 
 resource "google_project_service" "cloud_run" {
   service            = "run.googleapis.com"
   disable_on_destroy = false
+  
+  depends_on = [google_project_service.service_usage]
+}
+
+resource "google_project_service" "iam" {
+  service            = "iam.googleapis.com"
+  disable_on_destroy = false
+  
+  depends_on = [google_project_service.service_usage]
 }
 
 # Create Firestore Database (only if it doesn't exist)
@@ -149,6 +173,8 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
 resource "google_service_account" "function_sa" {
   account_id   = "${var.function_name}-sa"
   display_name = "Service Account for V2V2B Interrogator Function"
+  
+  depends_on = [google_project_service.iam]
 }
 
 # Grant necessary IAM roles to the service account
