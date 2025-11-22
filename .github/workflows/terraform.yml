@@ -28,6 +28,7 @@ on:
 env:
   TERRAFORM_VERSION: '1.6.0'
   WORKING_DIR: './terraform'
+  TERRAFORM_STATE_BUCKET: ${{ vars.TERRAFORM_STATE_BUCKET }}
 
 permissions:
   contents: read
@@ -72,23 +73,39 @@ jobs:
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Verify Service Account Permissions
+      - name: Verify Prerequisites
         run: |
+          echo "=== Checking GCP Project Prerequisites ==="
+          
+          # 1. Check authenticated account
           echo "Current authenticated account:"
-          gcloud auth list --filter=status:ACTIVE --format="value(account)"
-          
-          echo "Checking service account permissions..."
           SA_EMAIL=$(gcloud auth list --filter=status:ACTIVE --format="value(account)")
-          
           echo "Service account: $SA_EMAIL"
           echo "Project: ${{ vars.GCP_PROJECT_ID }}"
           
-          # Check if the service account has the necessary roles
-          echo "Checking IAM policy for service account..."
+          # 2. Check billing status
+          echo ""
+          echo "Checking billing status..."
+          if gcloud billing projects describe ${{ vars.GCP_PROJECT_ID }} --format="value(billingEnabled)" 2>/dev/null | grep -q "True"; then
+            echo "✓ Billing is enabled"
+          else
+            echo "❌ Billing is NOT enabled"
+            echo "⚠️  REQUIRED: Enable billing for this project"
+            echo "   Go to: https://console.cloud.google.com/billing/linkedaccount?project=${{ vars.GCP_PROJECT_ID }}"
+            echo "   Associate a billing account to enable paid services (Cloud Build, Cloud Run, etc.)"
+            exit 1
+          fi
+          
+          # 3. Check service account permissions
+          echo ""
+          echo "Checking service account permissions..."
           gcloud projects get-iam-policy ${{ vars.GCP_PROJECT_ID }} \
             --flatten="bindings[].members" \
             --format="table(bindings.role)" \
             --filter="bindings.members:$SA_EMAIL" || echo "Could not retrieve IAM policy"
+          
+          echo ""
+          echo "✓ Prerequisites check completed"
 
       - name: Enable prerequisite GCP APIs
         run: |
@@ -134,7 +151,7 @@ jobs:
 
       - name: Terraform Init
         id: init
-        run: terraform init
+        run: terraform init -backend-config="bucket=${{ env.TERRAFORM_STATE_BUCKET }}"
 
       - name: Terraform Validate
         id: validate
@@ -157,6 +174,12 @@ jobs:
           # Check for REPO_NAME
           if [ -z "${{ vars.REPO_NAME }}" ] && [ -z "$REPO_NAME" ]; then
             echo "::error::REPO_NAME variable is not accessible. Please check environment configuration"
+            exit 1
+          fi
+          
+          # Check for TERRAFORM_STATE_BUCKET
+          if [ -z "${{ vars.TERRAFORM_STATE_BUCKET }}" ] && [ -z "$TERRAFORM_STATE_BUCKET" ]; then
+            echo "::error::TERRAFORM_STATE_BUCKET variable is not accessible. Please check environment configuration"
             exit 1
           fi
           

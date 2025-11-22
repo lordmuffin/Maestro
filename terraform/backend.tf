@@ -1,14 +1,12 @@
 # Backend configuration for Terraform state management
 #
-# Uncomment and configure one of the following backends:
+# Google Cloud Storage backend for state management
 
-# Option 1: Google Cloud Storage (Recommended for GCP deployments)
-# terraform {
-#   backend "gcs" {
-#     bucket = "your-terraform-state-bucket"
-#     prefix = "v2v2b-interrogator/state"
-#   }
-# }
+terraform {
+  backend "gcs" {
+    prefix = "v2v2b-interrogator/state"
+  }
+}
 
 # Option 2: Terraform Cloud (Recommended for team collaboration)
 # terraform {
