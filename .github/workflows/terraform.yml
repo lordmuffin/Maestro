@@ -72,6 +72,13 @@ jobs:
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Enable prerequisite GCP APIs
+        run: |
+          echo "Enabling prerequisite APIs that must be enabled before Terraform can manage other APIs..."
+          gcloud services enable serviceusage.googleapis.com --project=${{ vars.GCP_PROJECT_ID }}
+          gcloud services enable iam.googleapis.com --project=${{ vars.GCP_PROJECT_ID }}
+          echo "Prerequisite APIs enabled successfully"
+
       - name: Terraform Format Check
         id: fmt
         run: terraform fmt -check -recursive

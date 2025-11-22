@@ -1,3 +1,15 @@
+# Prerequisites:
+# The following APIs must be manually enabled in the GCP project before running Terraform:
+# 1. Service Usage API (serviceusage.googleapis.com)
+# 2. Identity and Access Management (IAM) API (iam.googleapis.com)
+# 
+# These can be enabled via:
+# gcloud services enable serviceusage.googleapis.com iam.googleapis.com --project=<PROJECT_ID>
+# 
+# Or through the GCP Console at:
+# https://console.developers.google.com/apis/api/serviceusage.googleapis.com/overview
+# https://console.developers.google.com/apis/api/iam.googleapis.com/overview
+
 terraform {
   required_version = ">= 1.0"
 
@@ -18,59 +30,38 @@ provider "google" {
   region  = var.region
 }
 
-# Enable required APIs - Service Usage API must be enabled first
-resource "google_project_service" "service_usage" {
-  service            = "serviceusage.googleapis.com"
-  disable_on_destroy = false
-}
+# Enable required APIs
+# Note: Service Usage API and IAM API must be manually enabled in the GCP Console first
+# or through gcloud CLI before running Terraform
 
 resource "google_project_service" "cloud_functions" {
   service            = "cloudfunctions.googleapis.com"
   disable_on_destroy = false
-  
-  depends_on = [google_project_service.service_usage]
 }
 
 resource "google_project_service" "cloud_build" {
   service            = "cloudbuild.googleapis.com"
   disable_on_destroy = false
-  
-  depends_on = [google_project_service.service_usage]
 }
 
 resource "google_project_service" "firestore" {
   service            = "firestore.googleapis.com"
   disable_on_destroy = false
-  
-  depends_on = [google_project_service.service_usage]
 }
 
 resource "google_project_service" "aiplatform" {
   service            = "aiplatform.googleapis.com"
   disable_on_destroy = false
-  
-  depends_on = [google_project_service.service_usage]
 }
 
 resource "google_project_service" "chat" {
   service            = "chat.googleapis.com"
   disable_on_destroy = false
-  
-  depends_on = [google_project_service.service_usage]
 }
 
 resource "google_project_service" "cloud_run" {
   service            = "run.googleapis.com"
   disable_on_destroy = false
-  
-  depends_on = [google_project_service.service_usage]
-}
-
-resource "google_project_service" "iam" {
-  service            = "iam.googleapis.com"
-  disable_on_destroy = false
-  
-  depends_on = [google_project_service.service_usage]
 }
 
 # Create Firestore Database (only if it doesn't exist)
@@ -173,8 +164,6 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
 resource "google_service_account" "function_sa" {
   account_id   = "${var.function_name}-sa"
   display_name = "Service Account for V2V2B Interrogator Function"
-  
-  depends_on = [google_project_service.iam]
 }
 
 # Grant necessary IAM roles to the service account
