@@ -52,20 +52,19 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
-      # Option 1: Using Workload Identity Federation (Recommended for production)
-      # Uncomment this section and comment out the service account key section below
-      # - name: Authenticate to Google Cloud (Workload Identity)
-      #   uses: google-github-actions/auth@v2
-      #   with:
-      #     workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-      #     service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      # Option 2: Using Service Account Key
-      # This is simpler but less secure than Workload Identity
-      - name: Authenticate to Google Cloud (Service Account Key)
+      # Using Workload Identity Federation (Recommended for production)
+      - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      # Alternative: Using Service Account Key (less secure, commented out)
+      # Uncomment this section and comment out the Workload Identity section above if needed
+      # - name: Authenticate to Google Cloud (Service Account Key)
+      #   uses: google-github-actions/auth@v2
+      #   with:
+      #     credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
