@@ -87,19 +87,25 @@ jobs:
 
       - name: Validate Required Secrets
         run: |
-          if [ -z "${{ vars.GCP_PROJECT_ID }}" ]; then
-            echo "::error::GCP_PROJECT_ID variable is not set. Please configure it in Settings -> Environments -> project-maestro-gcp"
+          # Check for GCP_PROJECT_ID
+          if [ -z "${{ vars.GCP_PROJECT_ID }}" ] && [ -z "$GCP_PROJECT_ID" ]; then
+            echo "::error::GCP_PROJECT_ID variable is not accessible. Please check environment configuration"
             exit 1
           fi
+          
+          # Check for GH_TOKEN
           if [ -z "${{ secrets.GH_TOKEN }}" ]; then
-            echo "::error::GH_TOKEN secret is not set. Please configure it in Settings -> Environments -> project-maestro-gcp"
+            echo "::error::GH_TOKEN secret is not set. Please configure it in environment settings"
             exit 1
           fi
-          if [ -z "${{ vars.REPO_NAME }}" ]; then
-            echo "::error::REPO_NAME variable is not set. Please configure it in Settings -> Environments -> project-maestro-gcp"
+          
+          # Check for REPO_NAME
+          if [ -z "${{ vars.REPO_NAME }}" ] && [ -z "$REPO_NAME" ]; then
+            echo "::error::REPO_NAME variable is not accessible. Please check environment configuration"
             exit 1
           fi
-          echo "All required secrets are configured"
+          
+          echo "All required variables and secrets are accessible"
 
       - name: Terraform Plan
         id: plan

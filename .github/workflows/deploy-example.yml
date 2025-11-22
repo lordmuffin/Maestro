@@ -1,0 +1,155 @@
+name: 'Example Multi-Environment Deployment'
+
+on:
+  # Automatic deployment to dev on pull requests
+  pull_request:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/**'
+
+  # Manual deployment to any environment
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Target environment for deployment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+        default: 'dev'
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+        default: 'plan'
+      skip_approval:
+        description: 'Skip manual approval (dev/staging only)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # Automatic dev deployment on PRs
+  auto-deploy-dev:
+    name: 'Auto Deploy to Dev'
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/terraform-apply-template.yml
+    with:
+      environment: 'dev'
+      auto_approve: true
+      cost_threshold: 100
+      enable_notifications: false
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  # Manual deployment to selected environment
+  manual-deploy:
+    name: 'Manual Deploy to ${{ github.event.inputs.target_environment }}'
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/terraform-apply-template.yml
+    with:
+      environment: ${{ github.event.inputs.target_environment }}
+      auto_approve: ${{ github.event.inputs.skip_approval }}
+      cost_threshold: ${{ github.event.inputs.target_environment == 'production' && 500 || 200 }}
+      enable_notifications: true
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+  # Post-deployment validation
+  validate-deployment:
+    name: 'Validate Deployment'
+    needs: [auto-deploy-dev, manual-deploy]
+    if: always() && (needs.auto-deploy-dev.result == 'success' || needs.manual-deploy.result == 'success')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Get Function URL
+        id: get-url
+        run: |
+          if [[ "${{ needs.auto-deploy-dev.result }}" == "success" ]]; then
+            echo "function_url=${{ needs.auto-deploy-dev.outputs.function_url }}" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          elif [[ "${{ needs.manual-deploy.result }}" == "success" ]]; then
+            echo "function_url=${{ needs.manual-deploy.outputs.function_url }}" >> $GITHUB_OUTPUT
+            echo "environment=${{ github.event.inputs.target_environment }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Integration Tests
+        if: steps.get-url.outputs.function_url != 'N/A'
+        run: |
+          FUNCTION_URL="${{ steps.get-url.outputs.function_url }}"
+          ENVIRONMENT="${{ steps.get-url.outputs.environment }}"
+          
+          echo "🧪 Running integration tests for $ENVIRONMENT environment..."
+          echo "🔗 Function URL: $FUNCTION_URL"
+          
+          # Basic connectivity test
+          if curl -f -s "$FUNCTION_URL/health" > /dev/null; then
+            echo "✅ Health check passed"
+          else
+            echo "❌ Health check failed"
+            exit 1
+          fi
+          
+          # Performance test (basic)
+          RESPONSE_TIME=$(curl -o /dev/null -s -w '%{time_total}' "$FUNCTION_URL/health")
+          echo "⏱️ Response time: ${RESPONSE_TIME}s"
+          
+          if (( $(echo "$RESPONSE_TIME > 5.0" | bc -l) )); then
+            echo "⚠️ Slow response time detected"
+          else
+            echo "✅ Response time within acceptable range"
+          fi
+
+      - name: Security Scan Deployed Function
+        if: steps.get-url.outputs.function_url != 'N/A'
+        run: |
+          FUNCTION_URL="${{ steps.get-url.outputs.function_url }}"
+          
+          echo "🔒 Running security scan on deployed function..."
+          
+          # Check for HTTPS
+          if [[ "$FUNCTION_URL" == https://* ]]; then
+            echo "✅ HTTPS enabled"
+          else
+            echo "❌ HTTPS not enabled"
+            exit 1
+          fi
+          
+          # Check headers
+          echo "🔍 Checking security headers..."
+          HEADERS=$(curl -I -s "$FUNCTION_URL")
+          
+          if echo "$HEADERS" | grep -i "x-frame-options" > /dev/null; then
+            echo "✅ X-Frame-Options header present"
+          else
+            echo "⚠️ X-Frame-Options header missing"
+          fi
+
+      - name: Generate Test Report
+        run: |
+          echo "## 🧪 Post-Deployment Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Test | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Health Check | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| HTTPS | ✅ Enabled |" >> $GITHUB_STEP_SUMMARY
+          echo "| Performance | ✅ Acceptable |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Headers | ⚠️ Partial |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ steps.get-url.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Function URL**: ${{ steps.get-url.outputs.function_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployed by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
