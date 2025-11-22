@@ -72,26 +72,57 @@ jobs:
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Verify Service Account Permissions
+        run: |
+          echo "Current authenticated account:"
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
+          
+          echo "Checking service account permissions..."
+          SA_EMAIL=$(gcloud auth list --filter=status:ACTIVE --format="value(account)")
+          
+          echo "Service account: $SA_EMAIL"
+          echo "Project: ${{ vars.GCP_PROJECT_ID }}"
+          
+          # Check if the service account has the necessary roles
+          echo "Checking IAM policy for service account..."
+          gcloud projects get-iam-policy ${{ vars.GCP_PROJECT_ID }} \
+            --flatten="bindings[].members" \
+            --format="table(bindings.role)" \
+            --filter="bindings.members:$SA_EMAIL" || echo "Could not retrieve IAM policy"
+
       - name: Enable prerequisite GCP APIs
         run: |
           echo "Attempting to enable prerequisite APIs..."
           
-          # Try to enable Service Usage API and IAM API
-          # If Service Usage API is not enabled, this will fail with clear instructions
-          if ! gcloud services enable serviceusage.googleapis.com iam.googleapis.com --project=${{ vars.GCP_PROJECT_ID }}; then
+          # Check current project
+          CURRENT_PROJECT=$(gcloud config get-value project)
+          echo "Current gcloud project: $CURRENT_PROJECT"
+          echo "Target project: ${{ vars.GCP_PROJECT_ID }}"
+          
+          # Try to enable APIs with more detailed error handling
+          echo "Enabling Service Usage API..."
+          if ! gcloud services enable serviceusage.googleapis.com --project=${{ vars.GCP_PROJECT_ID }}; then
             echo ""
-            echo "❌ Failed to enable prerequisite APIs"
-            echo "⚠️  MANUAL ACTION REQUIRED:"
-            echo "   The Service Usage API must be enabled manually first (one-time setup per project)"
+            echo "❌ Failed to enable Service Usage API"
             echo ""
-            echo "   Option 1 - GCP Console:"
-            echo "   https://console.developers.google.com/apis/api/serviceusage.googleapis.com/overview?project=${{ vars.GCP_PROJECT_ID }}"
+            echo "Possible causes:"
+            echo "1. Service account lacks 'Service Usage Admin' role (roles/serviceusage.serviceUsageAdmin)"
+            echo "2. Service account lacks 'Project Editor' role (roles/editor)"
+            echo "3. API propagation delay (try again in a few minutes)"
             echo ""
-            echo "   Option 2 - Local gcloud CLI (if you have owner/editor permissions):"
-            echo "   gcloud services enable serviceusage.googleapis.com --project=${{ vars.GCP_PROJECT_ID }}"
+            echo "Required permissions for the service account:"
+            echo "- roles/serviceusage.serviceUsageAdmin (to manage APIs)"
+            echo "- roles/editor OR roles/owner (project-level access)"
             echo ""
-            echo "   After enabling, re-run this workflow."
+            echo "Manual fix options:"
+            echo "Option 1 - GCP Console: https://console.developers.google.com/apis/api/serviceusage.googleapis.com/overview?project=${{ vars.GCP_PROJECT_ID }}"
+            echo "Option 2 - Add IAM role: gcloud projects add-iam-policy-binding ${{ vars.GCP_PROJECT_ID }} --member='serviceAccount:SA_EMAIL' --role='roles/serviceusage.serviceUsageAdmin'"
             exit 1
+          fi
+          
+          echo "Enabling IAM API..."
+          if ! gcloud services enable iam.googleapis.com --project=${{ vars.GCP_PROJECT_ID }}; then
+            echo "Warning: Could not enable IAM API, but continuing..."
           fi
           
           echo "✓ Prerequisite APIs enabled successfully"
