@@ -74,10 +74,27 @@ jobs:
 
       - name: Enable prerequisite GCP APIs
         run: |
-          echo "Enabling prerequisite APIs that must be enabled before Terraform can manage other APIs..."
-          gcloud services enable serviceusage.googleapis.com --project=${{ vars.GCP_PROJECT_ID }}
-          gcloud services enable iam.googleapis.com --project=${{ vars.GCP_PROJECT_ID }}
-          echo "Prerequisite APIs enabled successfully"
+          echo "Attempting to enable prerequisite APIs..."
+          
+          # Try to enable Service Usage API and IAM API
+          # If Service Usage API is not enabled, this will fail with clear instructions
+          if ! gcloud services enable serviceusage.googleapis.com iam.googleapis.com --project=${{ vars.GCP_PROJECT_ID }}; then
+            echo ""
+            echo "❌ Failed to enable prerequisite APIs"
+            echo "⚠️  MANUAL ACTION REQUIRED:"
+            echo "   The Service Usage API must be enabled manually first (one-time setup per project)"
+            echo ""
+            echo "   Option 1 - GCP Console:"
+            echo "   https://console.developers.google.com/apis/api/serviceusage.googleapis.com/overview?project=${{ vars.GCP_PROJECT_ID }}"
+            echo ""
+            echo "   Option 2 - Local gcloud CLI (if you have owner/editor permissions):"
+            echo "   gcloud services enable serviceusage.googleapis.com --project=${{ vars.GCP_PROJECT_ID }}"
+            echo ""
+            echo "   After enabling, re-run this workflow."
+            exit 1
+          fi
+          
+          echo "✓ Prerequisite APIs enabled successfully"
 
       - name: Terraform Format Check
         id: fmt
