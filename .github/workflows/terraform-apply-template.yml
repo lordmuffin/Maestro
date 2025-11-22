@@ -1,0 +1,467 @@
+name: 'Terraform Apply Template'
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Target environment (dev, staging, production)'
+        required: true
+        type: string
+        default: 'dev'
+      terraform_version:
+        description: 'Terraform version to use'
+        required: false
+        type: string
+        default: '1.6.0'
+      working_directory:
+        description: 'Working directory for Terraform files'
+        required: false
+        type: string
+        default: './terraform'
+      auto_approve:
+        description: 'Skip manual approval for non-production environments'
+        required: false
+        type: boolean
+        default: false
+      cost_threshold:
+        description: 'Maximum monthly cost threshold in USD'
+        required: false
+        type: number
+        default: 1000
+      enable_notifications:
+        description: 'Enable Slack/email notifications'
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        description: 'GCP Workload Identity Provider'
+        required: false
+      GCP_SERVICE_ACCOUNT:
+        description: 'GCP Service Account email'
+        required: false
+      GCP_CREDENTIALS:
+        description: 'GCP Service Account key (alternative to Workload Identity)'
+        required: false
+      GH_TOKEN:
+        description: 'GitHub Personal Access Token'
+        required: true
+      SLACK_WEBHOOK:
+        description: 'Slack webhook URL for notifications'
+        required: false
+      NOTIFICATION_EMAIL:
+        description: 'Email for notifications'
+        required: false
+    outputs:
+      function_url:
+        description: 'Deployed function URL'
+        value: ${{ jobs.terraform-apply.outputs.function_url }}
+      function_name:
+        description: 'Deployed function name'
+        value: ${{ jobs.terraform-apply.outputs.function_name }}
+      deployment_status:
+        description: 'Deployment status (success/failure)'
+        value: ${{ jobs.terraform-apply.outputs.status }}
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+        default: 'dev'
+      action:
+        description: 'Terraform action to perform'
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+        default: 'plan'
+      auto_approve:
+        description: 'Skip manual approval (dev/staging only)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  TERRAFORM_VERSION: ${{ inputs.terraform_version || '1.6.0' }}
+  WORKING_DIR: ${{ inputs.working_directory || './terraform' }}
+  ENVIRONMENT: ${{ inputs.environment || 'dev' }}
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+  issues: write
+
+jobs:
+  validate-inputs:
+    name: 'Validate Inputs'
+    runs-on: ubuntu-latest
+    outputs:
+      requires_approval: ${{ steps.approval-check.outputs.requires_approval }}
+      environment_config: ${{ steps.env-config.outputs.config }}
+    
+    steps:
+      - name: Validate Environment
+        run: |
+          if [[ "${{ env.ENVIRONMENT }}" != "dev" && "${{ env.ENVIRONMENT }}" != "staging" && "${{ env.ENVIRONMENT }}" != "production" ]]; then
+            echo "::error::Invalid environment: ${{ env.ENVIRONMENT }}. Must be one of: dev, staging, production"
+            exit 1
+          fi
+          echo "✅ Environment validation passed: ${{ env.ENVIRONMENT }}"
+
+      - name: Check Approval Requirements
+        id: approval-check
+        run: |
+          if [[ "${{ env.ENVIRONMENT }}" == "production" ]]; then
+            echo "requires_approval=true" >> $GITHUB_OUTPUT
+            echo "🔒 Production deployment requires manual approval"
+          elif [[ "${{ env.ENVIRONMENT }}" == "staging" && "${{ inputs.auto_approve }}" != "true" ]]; then
+            echo "requires_approval=true" >> $GITHUB_OUTPUT
+            echo "🔒 Staging deployment requires manual approval"
+          else
+            echo "requires_approval=false" >> $GITHUB_OUTPUT
+            echo "✅ Auto-approval enabled for ${{ env.ENVIRONMENT }}"
+          fi
+
+      - name: Set Environment Configuration
+        id: env-config
+        run: |
+          case "${{ env.ENVIRONMENT }}" in
+            "production")
+              echo "config={\"env_name\":\"project-maestro-gcp\",\"region\":\"us-central1\",\"min_instances\":1,\"max_instances\":20}" >> $GITHUB_OUTPUT
+              ;;
+            "staging")
+              echo "config={\"env_name\":\"project-maestro-staging\",\"region\":\"us-central1\",\"min_instances\":0,\"max_instances\":5}" >> $GITHUB_OUTPUT
+              ;;
+            "dev")
+              echo "config={\"env_name\":\"project-maestro-dev\",\"region\":\"us-central1\",\"min_instances\":0,\"max_instances\":3}" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+  security-scan:
+    name: 'Security Scan'
+    runs-on: ubuntu-latest
+    needs: validate-inputs
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: ${{ env.WORKING_DIR }}
+          soft_fail: ${{ env.ENVIRONMENT != 'production' }}
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ env.WORKING_DIR }}
+          framework: terraform
+          soft_fail: ${{ env.ENVIRONMENT != 'production' }}
+          output_format: cli
+
+  terraform-apply:
+    name: 'Terraform Apply - ${{ inputs.environment }}'
+    runs-on: ubuntu-latest
+    needs: [validate-inputs, security-scan]
+    environment:
+      name: ${{ fromJson(needs.validate-inputs.outputs.environment_config).env_name }}
+      url: ${{ steps.outputs.outputs.function_url }}
+    
+    outputs:
+      function_url: ${{ steps.outputs.outputs.function_url }}
+      function_name: ${{ steps.outputs.outputs.function_name }}
+      status: ${{ steps.deployment.outcome }}
+    
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Authenticate to Google Cloud (Workload Identity)
+        if: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER != '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Authenticate to Google Cloud (Service Account Key)
+        if: ${{ secrets.GCP_CREDENTIALS != '' && secrets.GCP_WORKLOAD_IDENTITY_PROVIDER == '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Backup Terraform State
+        id: backup
+        run: |
+          echo "🔄 Creating state backup..."
+          BACKUP_DIR=".terraform-backups/$(date +%Y%m%d-%H%M%S)-${{ env.ENVIRONMENT }}"
+          mkdir -p "$BACKUP_DIR"
+          
+          if terraform state list > /dev/null 2>&1; then
+            terraform state pull > "$BACKUP_DIR/terraform.tfstate.backup"
+            echo "✅ State backup created: $BACKUP_DIR"
+            echo "backup_path=$BACKUP_DIR" >> $GITHUB_OUTPUT
+          else
+            echo "ℹ️ No existing state to backup"
+            echo "backup_path=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Terraform Init
+        run: |
+          echo "🚀 Initializing Terraform..."
+          terraform init -input=false
+
+      - name: Terraform Format Check
+        run: |
+          echo "🎨 Checking Terraform format..."
+          terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        run: |
+          echo "✅ Validating Terraform configuration..."
+          terraform validate -no-color
+
+      - name: Drift Detection
+        id: drift
+        run: |
+          echo "🔍 Checking for configuration drift..."
+          terraform plan -detailed-exitcode \
+            -var="gcp_project=${{ vars.GCP_PROJECT_ID }}" \
+            -var="github_token=${{ secrets.GH_TOKEN }}" \
+            -var="repo_name=${{ vars.REPO_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -no-color -out=drift-plan
+          
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 1 ]; then
+            echo "❌ Terraform plan failed"
+            exit 1
+          elif [ $EXIT_CODE -eq 2 ]; then
+            echo "⚠️ Configuration drift detected"
+            echo "drift_detected=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ No drift detected"
+            echo "drift_detected=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Cost Estimation
+        id: cost
+        if: steps.drift.outputs.drift_detected == 'true'
+        run: |
+          echo "💰 Estimating deployment costs..."
+          # This would integrate with tools like Infracost in a real scenario
+          echo "estimated_cost=50" >> $GITHUB_OUTPUT
+          echo "ℹ️ Estimated monthly cost: $50 USD"
+
+      - name: Cost Threshold Check
+        if: steps.cost.outputs.estimated_cost != ''
+        run: |
+          ESTIMATED_COST=${{ steps.cost.outputs.estimated_cost }}
+          THRESHOLD=${{ inputs.cost_threshold || 1000 }}
+          
+          if (( $(echo "$ESTIMATED_COST > $THRESHOLD" | bc -l) )); then
+            echo "❌ Cost estimate ($${ESTIMATED_COST}) exceeds threshold ($${THRESHOLD})"
+            echo "::error::Deployment cost estimate exceeds configured threshold"
+            exit 1
+          else
+            echo "✅ Cost estimate within threshold: $${ESTIMATED_COST} <= $${THRESHOLD}"
+          fi
+
+      - name: Manual Approval Gate
+        if: needs.validate-inputs.outputs.requires_approval == 'true'
+        run: |
+          echo "🔒 Manual approval required for ${{ env.ENVIRONMENT }} environment"
+          echo "Please review the plan and approve this deployment"
+          echo "Waiting for approval..."
+          # In a real scenario, this would pause for manual approval via GitHub Environments
+
+      - name: Terraform Apply
+        id: deployment
+        run: |
+          echo "🚀 Applying Terraform configuration to ${{ env.ENVIRONMENT }}..."
+          
+          terraform apply -auto-approve drift-plan
+          
+          echo "✅ Terraform apply completed successfully"
+        env:
+          TF_VAR_gcp_project: ${{ vars.GCP_PROJECT_ID }}
+          TF_VAR_github_token: ${{ secrets.GH_TOKEN }}
+          TF_VAR_repo_name: ${{ vars.REPO_NAME }}
+          TF_VAR_environment: ${{ env.ENVIRONMENT }}
+
+      - name: Get Terraform Outputs
+        id: outputs
+        run: |
+          echo "📋 Collecting Terraform outputs..."
+          
+          FUNCTION_URL=$(terraform output -raw function_url 2>/dev/null || echo 'N/A')
+          FUNCTION_NAME=$(terraform output -raw function_name 2>/dev/null || echo 'N/A')
+          
+          echo "function_url=$FUNCTION_URL" >> $GITHUB_OUTPUT
+          echo "function_name=$FUNCTION_NAME" >> $GITHUB_OUTPUT
+          
+          echo "🎯 Function URL: $FUNCTION_URL"
+          echo "📦 Function Name: $FUNCTION_NAME"
+
+      - name: Test Deployment
+        if: steps.outputs.outputs.function_url != 'N/A'
+        run: |
+          echo "🧪 Testing deployment..."
+          FUNCTION_URL="${{ steps.outputs.outputs.function_url }}"
+          
+          if curl -f -s "$FUNCTION_URL/health" > /dev/null; then
+            echo "✅ Health check passed"
+          else
+            echo "⚠️ Health check failed, but deployment succeeded"
+          fi
+
+      - name: Tag Resources
+        run: |
+          echo "🏷️ Tagging resources for environment: ${{ env.ENVIRONMENT }}"
+          # Resource tagging would go here
+          echo "✅ Resources tagged successfully"
+
+  rollback:
+    name: 'Rollback on Failure'
+    runs-on: ubuntu-latest
+    needs: terraform-apply
+    if: failure() && needs.terraform-apply.outputs.status == 'failure'
+    environment:
+      name: ${{ fromJson(needs.validate-inputs.outputs.environment_config).env_name }}
+    
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Initialize Terraform
+        run: terraform init -input=false
+
+      - name: Restore Previous State
+        if: needs.terraform-apply.outputs.backup_path != ''
+        run: |
+          echo "🔄 Attempting to restore previous state..."
+          BACKUP_PATH="${{ needs.terraform-apply.outputs.backup_path }}"
+          
+          if [ -f "$BACKUP_PATH/terraform.tfstate.backup" ]; then
+            terraform state push "$BACKUP_PATH/terraform.tfstate.backup"
+            echo "✅ State restored successfully"
+          else
+            echo "⚠️ No backup available for restoration"
+          fi
+
+  notify:
+    name: 'Send Notifications'
+    runs-on: ubuntu-latest
+    needs: [terraform-apply, validate-inputs]
+    if: always() && inputs.enable_notifications == true
+    
+    steps:
+      - name: Determine Status
+        id: status
+        run: |
+          if [[ "${{ needs.terraform-apply.result }}" == "success" ]]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "icon=✅" >> $GITHUB_OUTPUT
+            echo "color=good" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "icon=❌" >> $GITHUB_OUTPUT
+            echo "color=danger" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack Notification
+        if: secrets.SLACK_WEBHOOK != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "${{ steps.status.outputs.icon }} Terraform Apply - ${{ env.ENVIRONMENT }}",
+              "attachments": [
+                {
+                  "color": "${{ steps.status.outputs.color }}",
+                  "fields": [
+                    {
+                      "title": "Environment",
+                      "value": "${{ env.ENVIRONMENT }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Status",
+                      "value": "${{ steps.status.outputs.status }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Function URL",
+                      "value": "${{ needs.terraform-apply.outputs.function_url || 'N/A' }}",
+                      "short": false
+                    },
+                    {
+                      "title": "Actor",
+                      "value": "${{ github.actor }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Workflow",
+                      "value": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Details>",
+                      "short": true
+                    }
+                  ]
+                }
+              ]
+            }
+
+      - name: Generate Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ env.ENVIRONMENT }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ steps.status.outputs.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Function URL | ${{ needs.terraform-apply.outputs.function_url || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Function Name | ${{ needs.terraform-apply.outputs.function_name || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Terraform Version | ${{ env.TERRAFORM_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Workflow Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID**: ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

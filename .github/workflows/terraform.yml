@@ -28,6 +28,7 @@ on:
 env:
   TERRAFORM_VERSION: '1.6.0'
   WORKING_DIR: './terraform'
+  TERRAFORM_STATE_BUCKET: ${{ vars.TERRAFORM_STATE_BUCKET }}
 
 permissions:
   contents: read
@@ -80,7 +81,7 @@ jobs:
 
       - name: Terraform Init
         id: init
-        run: terraform init
+        run: terraform init -backend-config="bucket=${{ env.TERRAFORM_STATE_BUCKET }}"
 
       - name: Terraform Validate
         id: validate

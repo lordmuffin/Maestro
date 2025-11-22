@@ -1,3 +1,27 @@
+# Prerequisites:
+# IMPORTANT: The following must be completed before running Terraform:
+#
+# 1. BILLING ACCOUNT: Enable billing for the GCP project
+#    - Go to: https://console.cloud.google.com/billing/linkedaccount?project=<PROJECT_ID>
+#    - Associate a valid billing account with the project
+#    - Required for Cloud Build, Cloud Run, Cloud Storage, and other paid services
+#
+# 2. ENABLE BOOTSTRAP APIs: Manually enable these APIs first
+#    - Service Usage API (serviceusage.googleapis.com)
+#    - Identity and Access Management (IAM) API (iam.googleapis.com)
+#    Via gcloud: gcloud services enable serviceusage.googleapis.com iam.googleapis.com --project=<PROJECT_ID>
+#    Via Console: https://console.developers.google.com/apis/api/serviceusage.googleapis.com/overview
+#
+# 3. SERVICE ACCOUNT PERMISSIONS: Grant required roles to the deployment service account
+#    Required roles for the service account used by GitHub Actions:
+#    - roles/editor (Project Editor) OR roles/owner (Project Owner)
+#    - roles/serviceusage.serviceUsageAdmin (Service Usage Admin)
+#    - roles/iam.serviceAccountAdmin (Service Account Admin) 
+#    - roles/resourcemanager.projectIamAdmin (Project IAM Admin)
+#
+#    Grant roles via: 
+#    gcloud projects add-iam-policy-binding <PROJECT_ID> --member='serviceAccount:<SA_EMAIL>' --role='<ROLE>'
+
 terraform {
   required_version = ">= 1.0"
 
@@ -19,6 +43,9 @@ provider "google" {
 }
 
 # Enable required APIs
+# Note: Service Usage API and IAM API must be manually enabled in the GCP Console first
+# or through gcloud CLI before running Terraform
+
 resource "google_project_service" "cloud_functions" {
   service            = "cloudfunctions.googleapis.com"
   disable_on_destroy = false
