@@ -30,7 +30,12 @@
       "Bash($null)",
       "Bash(Select-String \"maestro_local-rag\")",
       "WebSearch",
-      "Bash(timeout 30 powershell:*)"
+      "Bash(timeout 30 powershell:*)",
+      "Bash(kubectl get:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(kubectl describe:*)",
+      "Bash(kubectl apply:*)",
+      "Bash(kubectl delete:*)"
     ],
     "deny": [],
     "ask": []

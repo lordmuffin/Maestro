@@ -1,0 +1,24 @@
+---
+# In your traefik-deployment.yaml (or the Kustomize patch):
+spec:
+  template:
+    spec:
+      containers:
+      - name: traefik
+        args:
+          # ... existing arguments ...
+          
+          # 1. Define the ACME/Let's Encrypt resolver named 'letsencrypt'
+          - --certificatesresolvers.letsencrypt.acme.email=dorkmeisterx69@gmail.com
+          
+          # 2. Specify the storage path for ACME certificate information
+          - --certificatesresolvers.letsencrypt.acme.storage=/data/acme.json
+          
+          # 3. Choose a challenge type (TLS is often simplest for Traefik)
+          - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
+          
+          # 4. Optional: Enable the websecure entrypoint if not already done
+          - --entrypoints.websecure.address=:443/tcp
+          
+          # 5. Optional: Ensure insecure entrypoint for ACME challenge if needed
+          - --entrypoints.web.address=:80/tcp

@@ -3,7 +3,11 @@ kind: Kustomization
 
 # Reference to base manifests
 resources:
+  - https://raw.githubusercontent.com/traefik/traefik/v3.0/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
+  - https://github.com/cert-manager/cert-manager/releases/download/v1.19.1/cert-manager.yaml
+  - traefik
   - base
+
 
 # You can add overlays, patches, or customizations here
 # For example, to use different configurations for dev/staging/prod:

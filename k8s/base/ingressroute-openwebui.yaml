@@ -15,7 +15,7 @@ spec:
     - web      # HTTP (port 80)
     - websecure  # HTTPS (port 443)
   routes:
-  - match: Host(`maestro.example.com`)  # UPDATE THIS with your actual domain
+  - match: Host(`openwebui.lab.apj.dev`)  # UPDATE THIS with your actual domain
     kind: Rule
     services:
     - name: openwebui
@@ -23,10 +23,11 @@ spec:
     middlewares:
     - name: openwebui-headers
   # Uncomment the tls section if you want to enable HTTPS with cert-manager
-  # tls:
-  #   certResolver: letsencrypt  # or your cert resolver name
-  #   # OR use a predefined certificate:
-  #   # secretName: maestro-tls-cert
+  tls:
+    certResolver: letsencrypt  # or your cert resolver name
+    # OR use a predefined certificate:
+    # secretName: maestro-tls-cert
+
 
 ---
 # Middleware for security headers and other configurations

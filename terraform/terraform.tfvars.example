@@ -1,0 +1,30 @@
+# GCP Project Configuration
+gcp_project = "your-project-id"
+region      = "us-central1"
+
+# Function Configuration
+function_name = "v2v2b-interrogator"
+
+# GitHub Integration
+github_token = "ghp_your_github_personal_access_token_here"
+repo_name    = "your-username/your-repository"
+
+# Function URL (leave empty for first deployment, update after)
+function_url = ""
+
+# Resource Configuration
+memory             = "512Mi"  # Options: 256Mi, 512Mi, 1Gi, 2Gi, etc.
+timeout_seconds    = 540      # Maximum: 3600 (1 hour)
+max_instance_count = 10       # Maximum concurrent instances
+min_instance_count = 0        # 0 = scale to zero when idle
+
+# Firestore Rules
+deploy_firestore_rules = true
+
+# Resource Labels
+labels = {
+  application = "v2v2b-interrogator"
+  managed-by  = "terraform"
+  environment = "production"
+  team        = "engineering"
+}

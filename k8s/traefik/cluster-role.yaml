@@ -1,0 +1,69 @@
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: traefik-ingress-controller
+rules:
+- apiGroups:
+  - "" # Core resources
+  resources:
+  - services
+  - endpoints
+  - secrets
+  - configmaps
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - update # Needed for ACME to manage certificates
+
+- apiGroups:
+  - discovery.k8s.io # For EndpointSlices
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
+
+- apiGroups:
+  - traefik.io # Traefik CRDs
+  resources:
+  - ingressroutes
+  - ingressroutetcps
+  - ingressrouteudps
+  - middlewares
+  - middlewaretcps
+  - tlsoptions
+  - tlsstores
+  - traefikservices
+  - serverstransports
+  - serverstransporttcps
+  verbs:
+  - get
+  - list
+  - watch
+
+- apiGroups:
+  - extensions
+  - networking.k8s.io
+  resources:
+  - ingresses
+  - ingressclasses
+  verbs:
+  - get
+  - list
+  - watch
+
+- apiGroups:
+  - extensions
+  - networking.k8s.io
+  resources:
+  - ingresses/status
+  verbs:
+  - update

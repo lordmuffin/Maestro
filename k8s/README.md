@@ -50,7 +50,13 @@ This guide provides comprehensive instructions for deploying the Maestro AI Assi
    # Verify installation
    flux --version
    ```
+   ```
+  # Install the Flux CLI using Chocolatey (requires an elevated/admin PowerShell session)
+  choco install flux
 
+  # Verify the installation
+  flux --version
+  ```
 5. **Docker or Podman** - For building the backend image
    ```bash
    # Verify Docker installation
@@ -296,8 +302,66 @@ volumes:
 Update `k8s/base/deployment-backend.yaml` accordingly.
 
 ---
+```
+# Change directory
+Set-Location -Path C:\Users\user\Maestro 
+# Note: Use the appropriate Windows path for your project.
+
+# Validate Kustomize build and pipe output to a file
+# Use the call operator (&) to execute the external executable kustomize
+& kustomize build k8s/ | Out-File -FilePath C:\temp\maestro-manifests.yaml -Encoding UTF8
+
+# Review the generated manifests
+# Use 'Get-Content' (gc) for reading files in PowerShell
+Get-Content C:\temp\maestro-manifests.yaml | Out-Host
+# For large files, you might prefer a dedicated text editor or 'more'
+# Get-Content C:\temp\maestro-manifests.yaml | more
+
+# Validate with kubectl (same command as kubectl is a native executable)
+kubectl apply --dry-run=client -f C:\temp\maestro-manifests.yaml
+```
+```
+# Apply the manifests using Kustomize directory
+kubectl apply -k k8s/
+
+# Or use the generated file
+kubectl apply -f C:\temp\maestro-manifests.yaml
+```
+```
+# Watch namespace resources
+kubectl get all -n maestro -w
+
+# Check pod status
+kubectl get pods -n maestro
+
+# View logs for specific pod
+kubectl logs -n maestro -f deployment/backend
+kubectl logs -n maestro -f deployment/openwebui
+kubectl logs -n maestro -f deployment/postgres
+
+# Check persistent volume claims
+kubectl get pvc -n maestro
+
+# Check ingress route
+kubectl get ingressroute -n maestro
+```
+```
+# Check all deployments are ready
+kubectl get deployments -n maestro
+
+# Expected output (kubectl output format is identical):
+# NAME          READY   UP-TO-DATE   AVAILABLE
+# backend       1/1     1            1
+# mcpo          1/1     1            1
+# openwebui     1/1     1            1
+# postgres      1/1     1            1
+# redis         1/1     1            1
+```
+
+---
 
 ## Manual Deployment with Kustomize
+kubectl apply -f https://raw.githubusercontent.com/traefik/traefik/v2.10/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
 
 ### 1. Validate the Configuration
 
@@ -311,6 +375,7 @@ less /tmp/maestro-manifests.yaml
 
 # Validate with kubectl
 kubectl apply --dry-run=client -f /tmp/maestro-manifests.yaml
+kubectl apply -f C:\temp\maestro-manifests.yaml
 ```
 
 ### 2. Deploy to Kubernetes
