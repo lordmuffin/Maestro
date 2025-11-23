@@ -1381,6 +1381,15 @@ def get_upload_ui_html(session_id: str) -> str:
     """
 
 
+def add_cors_headers(response):
+    """Add CORS headers to response for browser compatibility."""
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    response.headers['Access-Control-Max-Age'] = '3600'
+    return response
+
+
 @functions_framework.http
 def entry_point(request):
     """
@@ -1388,6 +1397,10 @@ def entry_point(request):
     Routes requests based on method and query parameters.
     """
     try:
+        # Handle CORS preflight requests
+        if request.method == 'OPTIONS':
+            response = make_response('', 204)
+            return add_cors_headers(response)
         # Get query parameters and path
         mode = request.args.get('mode', '')
         session_id = request.args.get('session', '')
@@ -1407,25 +1420,29 @@ def entry_point(request):
         # Route B: Upload UI (GET /?mode=ui&session=...)
         elif request.method == 'GET' and mode == 'ui':
             if not session_id:
-                return 'Missing session parameter', 400
+                response = make_response('Missing session parameter', 400)
+                return add_cors_headers(response)
 
             html = get_upload_ui_html(session_id)
             response = make_response(html)
             response.headers['Content-Type'] = 'text/html'
-            return response
+            return add_cors_headers(response)
 
         # Route C: File Upload Handler (POST /?mode=upload&session=...)
         elif request.method == 'POST' and mode == 'upload':
             if not session_id:
-                return 'Missing session parameter', 400
+                response = make_response('Missing session parameter', 400)
+                return add_cors_headers(response)
 
             # Get uploaded file
             if 'file' not in request.files:
-                return 'No file uploaded', 400
+                response = make_response('No file uploaded', 400)
+                return add_cors_headers(response)
 
             file = request.files['file']
             if file.filename == '':
-                return 'Empty filename', 400
+                response = make_response('Empty filename', 400)
+                return add_cors_headers(response)
 
             # Read file data
             file_data = file.read()
@@ -1438,13 +1455,14 @@ def entry_point(request):
 
             response = make_response(html_response)
             response.headers['Content-Type'] = 'text/html'
-            return response
+            return add_cors_headers(response)
 
         # Route D: Manual Drive Scan (GET /?mode=scan)
         elif request.method == 'GET' and mode == 'scan':
             handler = DriveMonitorHandler()
             result = handler.scan_and_process_new_files()
-            return jsonify(result), 200
+            response = jsonify(result)
+            return add_cors_headers(response), 200
 
         # Route E: Drive Webhook Handler (POST /?mode=drive_webhook)
         elif request.method == 'POST' and mode == 'drive_webhook':
@@ -1452,11 +1470,12 @@ def entry_point(request):
             # This will be called when new files are added to the watched folder
             handler = DriveMonitorHandler()
             result = handler.scan_and_process_new_files()
-            return jsonify(result), 200
+            response = jsonify(result)
+            return add_cors_headers(response), 200
 
         # Route F: Health Check (GET /)
         elif request.method == 'GET' and not mode:
-            return jsonify({
+            response = jsonify({
                 'status': 'healthy',
                 'service': 'V2V2B Interrogator',
                 'version': '2.0.0',
@@ -1476,11 +1495,14 @@ def entry_point(request):
                     'Obsidian vault sync',
                     'Automated PR creation'
                 ]
-            }), 200
+            })
+            return add_cors_headers(response), 200
 
         else:
-            return jsonify({'error': 'Invalid request'}), 400
+            response = jsonify({'error': 'Invalid request'})
+            return add_cors_headers(response), 400
 
     except Exception as e:
         logger.error(f"Unhandled error in entry_point: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        response = jsonify({'error': str(e)})
+        return add_cors_headers(response), 500
