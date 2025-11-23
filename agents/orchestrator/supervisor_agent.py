@@ -374,6 +374,110 @@ synchronized across Google Workspace.
     }
 
 
+def audio_worker(state: AgentState) -> dict:
+    """
+    Audio Interviewer Agent worker.
+
+    This worker handles audio recording processing, transcription, and
+    note-taking with an interactive "interrogation loop" to clarify
+    ambiguous facts before saving structured notes to Obsidian.
+
+    Use Cases:
+    - Process meeting recordings
+    - Transcribe interviews
+    - Extract structured notes from voice memos
+    - Clarify ambiguous information interactively
+    - Save formatted notes to Obsidian vault
+
+    Args:
+        state: Current agent state
+
+    Returns:
+        dict: Updated state with response and metadata
+    """
+    print("\n🎤 AUDIO INTERVIEWER AGENT activated")
+    print(f"   Query: {state['query']}")
+    print(f"   Task Type: {state.get('task_type', 'AUDIO_PROCESSING')}")
+    print(f"   Processing audio/transcript and generating structured notes...")
+
+    try:
+        from agents.note_taker.audio_agent import AudioInterviewerAgent
+        from pathlib import Path
+
+        # Initialize the agent
+        agent = AudioInterviewerAgent()
+
+        # Parse the query to extract any file paths or transcript content
+        # In production, this would be more sophisticated
+        query = state['query']
+
+        # For demo purposes, process as transcript
+        # In production, you'd check for file paths, accept audio uploads, etc.
+        result = agent.process(
+            transcript=query,
+            title="Processed Recording",
+            meeting_type="Meeting"
+        )
+
+        # Format response based on result
+        if result['status'] == 'complete':
+            response = f"""[Audio Interviewer Response]
+
+✅ Audio processing completed successfully!
+
+Status: {result['status']}
+Saved to: {result['saved_path']}
+
+Generated Notes Preview:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{result['notes'][:500]}...
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Your structured notes have been saved to your Obsidian vault with the #Maestro tag.
+"""
+        elif result['status'] == 'awaiting_user_input':
+            response = f"""[Audio Interviewer Response]
+
+I've analyzed the transcript and need some clarifications:
+
+{result.get('questions', 'No questions available')}
+
+Please provide answers to these questions so I can generate accurate notes.
+"""
+        else:
+            response = f"""[Audio Interviewer Response]
+
+⚠️ Status: {result['status']}
+Error: {result.get('error', 'Unknown error')}
+
+Please check the input and try again.
+"""
+
+        return {
+            "response": response,
+            "agent_used": "audio_interviewer",
+            "metadata": {
+                "privacy_level": "HIGH",
+                "processing_location": "local",
+                "status": result['status'],
+                "saved_path": result.get('saved_path'),
+                **result.get('metadata', {})
+            }
+        }
+
+    except Exception as e:
+        print(f"   ⚠️  Error in Audio Interviewer Agent: {e}")
+        return {
+            "response": f"I encountered an error processing the audio: {str(e)}. Please ensure the audio file or transcript is valid.",
+            "agent_used": "audio_interviewer",
+            "metadata": {
+                "privacy_level": "HIGH",
+                "processing_location": "local",
+                "error": str(e)
+            }
+        }
+
+
 # ============================================================================
 # Classifier Logic (Routing Matrix Implementation)
 # ============================================================================
@@ -384,13 +488,14 @@ def classify_query(state: AgentState) -> dict:
 
     This function analyzes the query to determine:
     1. Data Sensitivity (HIGH/MEDIUM/LOW)
-    2. Task Type (RETRIEVAL/SYNTHESIS/AUTOMATION)
-    3. Appropriate Agent (local/claude/gemini)
+    2. Task Type (RETRIEVAL/SYNTHESIS/AUTOMATION/AUDIO_PROCESSING)
+    3. Appropriate Agent (local/claude/gemini/audio)
 
     Routing Logic:
     - Keywords indicating privacy → HIGH sensitivity → local
     - Keywords indicating synthesis → SYNTHESIS task → claude
     - Keywords indicating automation → AUTOMATION task → gemini
+    - Keywords indicating audio/recording → AUDIO_PROCESSING task → audio
     - Default fallback → local (privacy-first)
 
     Args:
@@ -409,11 +514,25 @@ def classify_query(state: AgentState) -> dict:
     # Routing Matrix Implementation
     # Priority: Sensitivity → Task Type → Agent Selection
 
+    # AUDIO PROCESSING: Audio transcription and note-taking
+    audio_keywords = ['audio', 'recording', 'transcript', 'meeting recording',
+                      'voice note', 'interview recording', 'process audio',
+                      'transcribe', 'voice memo']
+    if any(keyword in query for keyword in audio_keywords):
+        classification = "audio"
+        sensitivity = "HIGH"  # Audio recordings are sensitive
+        task_type = "AUDIO_PROCESSING"
+        print(f"\n→ Decision: Route to AUDIO INTERVIEWER Agent")
+        print(f"   Reason: Audio processing and note-taking requested")
+        print(f"   Keywords matched: {[k for k in audio_keywords if k in query]}")
+
     # LOCAL RAG: Document/vault search queries
-    document_keywords = ['vault', 'document', 'documents', 'notes', 'obsidian', 'search my',
+    elif any(keyword in query for keyword in ['vault', 'document', 'documents', 'notes', 'obsidian', 'search my',
                         'find in my', 'what does my', 'show me from', 'knowledge base',
-                        'private', 'confidential', 'secret', 'personal', 'sensitive']
-    if any(keyword in query for keyword in document_keywords):
+                        'private', 'confidential', 'secret', 'personal', 'sensitive']):
+        document_keywords = ['vault', 'document', 'documents', 'notes', 'obsidian', 'search my',
+                            'find in my', 'what does my', 'show me from', 'knowledge base',
+                            'private', 'confidential', 'secret', 'personal', 'sensitive']
         classification = "local"
         sensitivity = "HIGH" if any(k in query for k in ['private', 'confidential', 'secret']) else "MEDIUM"
         task_type = "RETRIEVAL"
@@ -449,7 +568,7 @@ def classify_query(state: AgentState) -> dict:
         "task_type": task_type,
         "metadata": {
             "classifier": "rule_based",
-            "routing_matrix_version": "1.0",
+            "routing_matrix_version": "1.1",
             "query_length": len(state['query']),
         }
     }
@@ -469,11 +588,11 @@ def create_supervisor_graph() -> StateGraph:
                       ↓
                 [classify_query]
                       ↓
-            ┌─────────┼─────────┐
-            ↓         ↓         ↓
-      [local_worker] [claude_worker] [gemini_worker]
-            ↓         ↓         ↓
-            └─────────┼─────────┘
+            ┌─────────┼─────────┬─────────┐
+            ↓         ↓         ↓         ↓
+      [local_worker] [claude_worker] [gemini_worker] [audio_worker]
+            ↓         ↓         ↓         ↓
+            └─────────┼─────────┴─────────┘
                       ↓
                      END
 
@@ -488,6 +607,7 @@ def create_supervisor_graph() -> StateGraph:
     workflow.add_node("local", local_worker)
     workflow.add_node("claude", claude_worker)
     workflow.add_node("gemini", gemini_worker)
+    workflow.add_node("audio", audio_worker)
 
     # Set entry point to classifier
     workflow.set_entry_point("classifier")
@@ -500,6 +620,7 @@ def create_supervisor_graph() -> StateGraph:
             "local": "local",
             "claude": "claude",
             "gemini": "gemini",
+            "audio": "audio",
         }
     )
 
@@ -507,6 +628,7 @@ def create_supervisor_graph() -> StateGraph:
     workflow.add_edge("local", END)
     workflow.add_edge("claude", END)
     workflow.add_edge("gemini", END)
+    workflow.add_edge("audio", END)
 
     # Compile the graph
     return workflow.compile()
