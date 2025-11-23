@@ -1461,8 +1461,8 @@ def entry_point(request):
         elif request.method == 'GET' and mode == 'scan':
             handler = DriveMonitorHandler()
             result = handler.scan_and_process_new_files()
-            response = jsonify(result)
-            return add_cors_headers(response), 200
+            response = make_response(jsonify(result), 200)
+            return add_cors_headers(response)
 
         # Route E: Drive Webhook Handler (POST /?mode=drive_webhook)
         elif request.method == 'POST' and mode == 'drive_webhook':
@@ -1470,12 +1470,12 @@ def entry_point(request):
             # This will be called when new files are added to the watched folder
             handler = DriveMonitorHandler()
             result = handler.scan_and_process_new_files()
-            response = jsonify(result)
-            return add_cors_headers(response), 200
+            response = make_response(jsonify(result), 200)
+            return add_cors_headers(response)
 
         # Route F: Health Check (GET /)
         elif request.method == 'GET' and not mode:
-            response = jsonify({
+            response = make_response(jsonify({
                 'status': 'healthy',
                 'service': 'V2V2B Interrogator',
                 'version': '2.0.0',
@@ -1495,14 +1495,14 @@ def entry_point(request):
                     'Obsidian vault sync',
                     'Automated PR creation'
                 ]
-            })
-            return add_cors_headers(response), 200
+            }), 200)
+            return add_cors_headers(response)
 
         else:
-            response = jsonify({'error': 'Invalid request'})
-            return add_cors_headers(response), 400
+            response = make_response(jsonify({'error': 'Invalid request'}), 400)
+            return add_cors_headers(response)
 
     except Exception as e:
         logger.error(f"Unhandled error in entry_point: {e}", exc_info=True)
-        response = jsonify({'error': str(e)})
-        return add_cors_headers(response), 500
+        response = make_response(jsonify({'error': str(e)}), 500)
+        return add_cors_headers(response)
