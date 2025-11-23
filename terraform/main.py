@@ -1028,13 +1028,16 @@ class TelegramWebhookHandler:
         help_text += "I'm here to conduct technical interviews and extract architectural knowledge.\n\n"
         help_text += "**How to use:**\n"
         help_text += "1. Just send me text messages - I'll ask probing questions\n"
-        help_text += "2. Use /upload to get a link for uploading audio or images\n"
-        help_text += "3. Send me audio files or images directly in Telegram\n"
-        help_text += "4. Use /done when finished to create a GitHub PR with our conversation\n\n"
+        help_text += "2. Upload .txt or .md files directly in Telegram\n"
+        help_text += "3. Send MP4 videos for analysis\n"
+        help_text += "4. Send voice recordings for transcription\n"
+        help_text += "5. Use /done when finished to create a GitHub PR with our conversation\n\n"
         help_text += "**Features:**\n"
         help_text += "• Technical interview conversations\n"
-        help_text += "• Audio transcription and analysis\n"
-        help_text += "• Image analysis\n"
+        help_text += "• Text/Markdown file processing (.txt, .md)\n"
+        help_text += "• Video analysis (MP4)\n"
+        help_text += "• Voice recording transcription\n"
+        help_text += "• Validation workflow - approve before saving\n"
         help_text += "• Automatic PR creation with session history\n"
 
         self.telegram_client.send_message(chat_id, help_text)
@@ -1048,7 +1051,8 @@ class TelegramWebhookHandler:
         upload_url = f"{FUNCTION_URL}?mode=ui&session={session_id}"
         message = f"📎 Ready to upload? Click here:\n{upload_url}\n\n"
         message += "(Upload audio or images for analysis)\n\n"
-        message += "💡 Tip: You can also send files directly in this Telegram chat!"
+        message += "💡 Tip: You can also send files directly in this Telegram chat!\n"
+        message += "Supported: .txt, .md, .mp4, voice recordings"
 
         self.telegram_client.send_message(chat_id, message)
         return {'status': 'ok'}
@@ -1088,10 +1092,15 @@ class TelegramWebhookHandler:
                     return {'status': 'error'}
             elif 'document' in message:
                 document = message['document']
-                if document.get('mime_type') == 'text/plain' or document.get('file_name', '').endswith('.txt'):
+                mime_type = document.get('mime_type', '')
+                filename = document.get('file_name', '')
+
+                # Support .txt and .md files
+                if (mime_type == 'text/plain' or mime_type == 'text/markdown' or
+                    filename.endswith('.txt') or filename.endswith('.md')):
                     return self._process_text_file(session_id, chat_id, document)
                 else:
-                    self.telegram_client.send_message(chat_id, '❌ Only .txt files are supported for documents.')
+                    self.telegram_client.send_message(chat_id, '❌ Only .txt and .md files are supported for documents.')
                     return {'status': 'error'}
             elif 'audio' in message or 'photo' in message:
                 # Redirect audio and photos to web UI (can be extended later)
