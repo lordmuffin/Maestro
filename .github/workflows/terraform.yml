@@ -87,6 +87,67 @@ jobs:
         id: validate
         run: terraform validate -no-color
 
+      - name: Import Existing Resources (if needed)
+        id: import
+        continue-on-error: true
+        run: |
+          # Import existing resources if they exist
+          # This allows Terraform to manage resources that were created outside of Terraform
+
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID || 'gen-lang-client-0805519538' }}"
+          FUNCTION_NAME="v2v2b-interrogator"
+
+          # Import Firestore database
+          terraform import -var="gcp_project=$PROJECT_ID" \
+            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
+            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
+            google_firestore_database.database "projects/$PROJECT_ID/databases/(default)" 2>/dev/null || true
+
+          # Import Storage bucket
+          terraform import -var="gcp_project=$PROJECT_ID" \
+            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
+            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
+            google_storage_bucket.function_bucket "$PROJECT_ID-v2v2b-function-source" 2>/dev/null || true
+
+          # Import Service account
+          terraform import -var="gcp_project=$PROJECT_ID" \
+            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
+            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
+            google_service_account.function_sa "projects/$PROJECT_ID/serviceAccounts/$FUNCTION_NAME-sa@$PROJECT_ID.iam.gserviceaccount.com" 2>/dev/null || true
+
+          # Import API services
+          terraform import -var="gcp_project=$PROJECT_ID" \
+            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
+            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
+            google_project_service.cloud_functions "$PROJECT_ID/cloudfunctions.googleapis.com" 2>/dev/null || true
+
+          terraform import -var="gcp_project=$PROJECT_ID" \
+            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
+            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
+            google_project_service.cloud_build "$PROJECT_ID/cloudbuild.googleapis.com" 2>/dev/null || true
+
+          terraform import -var="gcp_project=$PROJECT_ID" \
+            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
+            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
+            google_project_service.firestore "$PROJECT_ID/firestore.googleapis.com" 2>/dev/null || true
+
+          terraform import -var="gcp_project=$PROJECT_ID" \
+            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
+            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
+            google_project_service.aiplatform "$PROJECT_ID/aiplatform.googleapis.com" 2>/dev/null || true
+
+          terraform import -var="gcp_project=$PROJECT_ID" \
+            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
+            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
+            google_project_service.chat "$PROJECT_ID/chat.googleapis.com" 2>/dev/null || true
+
+          terraform import -var="gcp_project=$PROJECT_ID" \
+            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
+            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
+            google_project_service.cloud_run "$PROJECT_ID/run.googleapis.com" 2>/dev/null || true
+
+          echo "Import step completed (errors are expected if resources don't exist or are already imported)"
+
       # Temporarily disabled for testing
       # - name: Validate Required Secrets
       #   run: |
