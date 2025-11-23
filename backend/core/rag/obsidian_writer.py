@@ -85,9 +85,15 @@ def save_to_obsidian(
     final_content = content
     tag_pattern = f"#{tag}"
 
-    if auto_tag and tag_pattern not in content:
-        # Add tag at the end if not present
-        final_content = f"{content.rstrip()}\n\n{tag_pattern}\n"
+    if auto_tag:
+        # Check if tag already exists in content (either in frontmatter or body)
+        if tag_pattern not in content:
+            # Add tag at the end if not present
+            final_content = f"{content.rstrip()}\n\n{tag_pattern}\n"
+        else:
+            # Tag already exists, use content as-is
+            final_content = content
+            logger.info(f"   Tag {tag_pattern} already present in content, skipping auto-append")
 
     # Write the file
     try:
