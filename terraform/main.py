@@ -796,6 +796,19 @@ def entry_point(request):
             response.headers['Content-Type'] = 'text/html'
             return response
 
+        # Route D: Health Check (GET /)
+        elif request.method == 'GET' and not mode:
+            return jsonify({
+                'status': 'healthy',
+                'service': 'V2V2B Interrogator',
+                'version': '1.0.0',
+                'endpoints': {
+                    'chat_webhook': 'POST /',
+                    'upload_ui': 'GET /?mode=ui&session=SESSION_ID',
+                    'file_upload': 'POST /?mode=upload&session=SESSION_ID'
+                }
+            }), 200
+
         else:
             return jsonify({'error': 'Invalid request'}), 400
 
