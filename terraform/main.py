@@ -1603,7 +1603,7 @@ class DriveMonitorHandler:
             # List files in folder
             files = self.drive_client.list_files(
                 folder_id=GOOGLE_DRIVE_FOLDER_ID,
-                file_types=['.txt', '.m4a']
+                file_types=['.txt', '.md', '.m4a']
             )
 
             processed_count = 0
@@ -1650,8 +1650,14 @@ class DriveMonitorHandler:
                 return {'success': False, 'filename': filename, 'error': 'Download failed'}
 
             # Process based on file type
-            if mime_type == 'text/plain' or filename.endswith('.txt'):
-                transcript = self.transcript_processor.process_text_transcript(file_data.decode('utf-8'))
+            # Support text files (.txt and .md)
+            if (mime_type in ['text/plain', 'text/markdown', 'application/octet-stream'] or
+                filename.endswith('.txt') or filename.endswith('.md')):
+                try:
+                    transcript = self.transcript_processor.process_text_transcript(file_data.decode('utf-8'))
+                except UnicodeDecodeError:
+                    # Try alternate encoding
+                    transcript = self.transcript_processor.process_text_transcript(file_data.decode('latin-1'))
             elif 'audio' in mime_type or filename.endswith('.m4a'):
                 transcript = self.transcript_processor.process_audio_transcript(file_data, filename)
             else:
