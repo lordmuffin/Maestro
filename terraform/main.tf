@@ -66,10 +66,6 @@ resource "google_project_service" "aiplatform" {
   disable_on_destroy = false
 }
 
-resource "google_project_service" "chat" {
-  service            = "chat.googleapis.com"
-  disable_on_destroy = false
-}
 
 resource "google_project_service" "cloud_run" {
   service            = "run.googleapis.com"
@@ -135,7 +131,7 @@ resource "google_storage_bucket_object" "function_source" {
 resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
   name        = var.function_name
   location    = var.region
-  description = "V2V2B Interrogator - Google Chat Bot for Technical Content Extraction"
+  description = "V2V2B Interrogator - Telegram Bot for Technical Content Extraction"
 
   build_config {
     runtime     = "python311"
@@ -158,6 +154,7 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
     environment_variables = {
       GCP_PROJECT              = var.gcp_project
       GITHUB_TOKEN             = var.github_token
+      TELEGRAM_BOT_TOKEN       = var.telegram_bot_token
       REPO_NAME                = var.repo_name
       GOOGLE_DRIVE_FOLDER_ID   = var.google_drive_folder_id
       OBSIDIAN_DRIVE_FOLDER_ID = var.obsidian_drive_folder_id
@@ -199,8 +196,8 @@ resource "google_project_iam_member" "aiplatform_user" {
   member  = "serviceAccount:${google_service_account.function_sa.email}"
 }
 
-# Note: roles/chat.bot is not required for Cloud Functions receiving Google Chat webhooks
-# The function only needs to be publicly accessible via google_cloud_run_service_iam_member.public_access
+# Note: For Telegram webhook, the function only needs to be publicly accessible
+# via google_cloud_run_service_iam_member.public_access
 
 resource "google_project_iam_member" "logging_writer" {
   project = var.gcp_project
@@ -217,7 +214,7 @@ resource "google_project_iam_member" "logging_writer" {
 #    - Obsidian folder: Grant "Editor" access
 # The Drive API service must be enabled (handled by google_project_service.drive)
 
-# Allow unauthenticated access to the function (for Google Chat webhook)
+# Allow unauthenticated access to the function (for Telegram webhook)
 resource "google_cloud_run_service_iam_member" "public_access" {
   project  = google_cloudfunctions2_function.v2v2b_interrogator.project
   location = google_cloudfunctions2_function.v2v2b_interrogator.location

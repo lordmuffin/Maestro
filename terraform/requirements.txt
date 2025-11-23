@@ -6,3 +6,4 @@ PyGithub==2.1.*
 google-api-python-client==2.116.*
 google-auth==2.27.*
 google-auth-httplib2==0.2.*
+python-telegram-bot==20.7

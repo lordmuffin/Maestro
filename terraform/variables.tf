@@ -21,6 +21,12 @@ variable "github_token" {
   sensitive   = true
 }
 
+variable "telegram_bot_token" {
+  description = "Telegram Bot Token obtained from @BotFather"
+  type        = string
+  sensitive   = true
+}
+
 variable "repo_name" {
   description = "GitHub repository in format 'username/repository'"
   type        = string

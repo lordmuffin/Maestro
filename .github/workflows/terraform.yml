@@ -32,6 +32,7 @@ env:
   # Terraform variables - centralized configuration
   TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
   TF_VAR_github_token: ${{ secrets.GH_TOKEN }}
+  TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TF_VAR_repo_name: ${{ vars.REPO_NAME || 'lordmuffin/Maestro' }}
   TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
   TF_VAR_obsidian_drive_folder_id: ${{ secrets.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
@@ -122,7 +123,6 @@ jobs:
           terraform import google_project_service.cloud_build "$PROJECT_ID/cloudbuild.googleapis.com" 2>/dev/null || true
           terraform import google_project_service.firestore "$PROJECT_ID/firestore.googleapis.com" 2>/dev/null || true
           terraform import google_project_service.aiplatform "$PROJECT_ID/aiplatform.googleapis.com" 2>/dev/null || true
-          terraform import google_project_service.chat "$PROJECT_ID/chat.googleapis.com" 2>/dev/null || true
           terraform import google_project_service.cloud_run "$PROJECT_ID/run.googleapis.com" 2>/dev/null || true
           terraform import google_project_service.drive "$PROJECT_ID/drive.googleapis.com" 2>/dev/null || true
 
@@ -141,9 +141,14 @@ jobs:
             echo "::error::GH_TOKEN secret is not set. Please configure it in Settings -> Secrets -> GH_TOKEN"
             exit 1
           fi
+          if [ -z "${{ env.TF_VAR_telegram_bot_token }}" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN secret is not set. Please configure it in Settings -> Secrets -> TELEGRAM_BOT_TOKEN"
+            exit 1
+          fi
           echo "✅ All required configuration is set"
           echo "Project: ${{ env.TF_VAR_gcp_project }}"
           echo "Repo: ${{ env.TF_VAR_repo_name }}"
+          echo "Telegram Bot: configured ✓"
           echo "Drive Folder ID: ${{ env.TF_VAR_google_drive_folder_id != '' && 'configured' || 'not set (optional)' }}"
           echo "Obsidian Folder ID: ${{ env.TF_VAR_obsidian_drive_folder_id != '' && 'configured' || 'not set (optional)' }}"
           echo "Drive Poll Interval: ${{ env.TF_VAR_drive_poll_interval }} seconds"

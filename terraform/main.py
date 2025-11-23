@@ -1,6 +1,6 @@
 """
-V2V2B Interrogator - Google Chat Bot for Technical Content Extraction
-A serverless application that interrogates technical authors via Google Chat
+V2V2B Interrogator - Telegram Bot for Technical Content Extraction
+A serverless application that interrogates technical authors via Telegram
 and processes multimodal inputs (text, audio, images) using Gemini AI.
 """
 
@@ -21,6 +21,9 @@ from github import Github
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from google.auth import default
+from telegram import Bot, Update
+from telegram.error import TelegramError
+import asyncio
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +32,7 @@ logger = logging.getLogger(__name__)
 # Environment variables
 GCP_PROJECT = os.environ.get('GCP_PROJECT')
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 REPO_NAME = os.environ.get('REPO_NAME')
 FUNCTION_URL = os.environ.get('FUNCTION_URL')
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '')
@@ -42,7 +46,7 @@ db = firestore.Client(project=GCP_PROJECT)
 vertexai.init(project=GCP_PROJECT, location="us-central1")
 
 # System prompts
-CHAT_SYSTEM_PROMPT = """You are a sarcastic but insightful Enterprise Architect conducting a technical interview.
+CHAT_SYSTEM_PROMPT = """You are a sarcastic but insightful Enterprise Architect conducting a technical interview via Telegram.
 Your goal is to extract detailed architectural knowledge from the user through probing questions.
 Be direct, occasionally sarcastic, but always professional. Ask follow-up questions that dig deeper.
 Focus on: design decisions, trade-offs, scalability, security, and real-world implementation challenges."""
@@ -658,116 +662,178 @@ class GitHubManager:
         return "\n".join(lines)
 
 
-class GoogleChatClient:
-    """Handles Google Chat API operations."""
+class TelegramClient:
+    """Handles Telegram Bot API operations."""
 
     def __init__(self):
-        # Get default credentials
-        credentials, _ = default()
-        self.service = build('chat', 'v1', credentials=credentials)
+        if not TELEGRAM_BOT_TOKEN:
+            raise ValueError("TELEGRAM_BOT_TOKEN environment variable not set")
+        self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-    def send_message(self, space_name: str, text: str) -> bool:
-        """Send a message to a Google Chat space."""
+    def send_message(self, chat_id: int, text: str) -> bool:
+        """Send a message to a Telegram chat."""
         try:
-            message = {
-                'text': text
-            }
-
-            result = self.service.spaces().messages().create(
-                parent=space_name,
-                body=message
-            ).execute()
-
-            logger.info(f"Message sent to {space_name}: {result.get('name')}")
+            # Run async send_message in sync context
+            asyncio.run(self.bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown'))
+            logger.info(f"Message sent to chat_id {chat_id}")
             return True
+        except TelegramError as e:
+            logger.error(f"Error sending message to Telegram: {e}")
+            return False
         except Exception as e:
-            logger.error(f"Error sending message to Google Chat: {e}")
+            logger.error(f"Unexpected error sending message to Telegram: {e}")
             return False
 
 
-class ChatWebhookHandler:
-    """Handles Google Chat webhook events."""
+class TelegramWebhookHandler:
+    """Handles Telegram webhook events."""
 
     def __init__(self):
         self.gemini = GeminiClient()
         self.github_manager = GitHubManager()
+        self.telegram_client = TelegramClient()
 
-    def handle(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process incoming chat webhook."""
+    def handle(self, update_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process incoming Telegram webhook."""
         try:
-            # Extract event type
-            event_type = event_data.get('type')
+            # Parse Telegram Update object
+            message = update_data.get('message', {})
 
-            # Handle different event types
-            if event_type == 'ADDED_TO_SPACE':
-                return {'text': '👋 Hello! I\'m the V2V2B Interrogator. Ready to extract some architectural wisdom?'}
+            if not message:
+                logger.warning("No message in update data")
+                return {'status': 'ignored'}
 
-            if event_type == 'REMOVED_FROM_SPACE':
-                return {}
+            # Extract user and chat data
+            from_user = message.get('from', {})
+            chat = message.get('chat', {})
 
-            # Handle MESSAGE event
-            message = event_data.get('message', {})
-            space = event_data.get('space', {})
-            user = event_data.get('user', {})
+            user_id = from_user.get('id')
+            username = from_user.get('username', 'unknown')
+            first_name = from_user.get('first_name', '')
+            chat_id = chat.get('id')
 
-            # Extract data
-            user_email = user.get('email', 'unknown@example.com')
-            space_name = space.get('name', '')
+            # Extract message text or caption
             message_text = message.get('text', '').strip()
 
-            # Generate session ID
+            # Generate session ID using Telegram user_id
             date_str = datetime.utcnow().strftime('%Y-%m-%d')
-            session_id = f"{user_email}_{date_str}"
+            session_id = f"telegram_{user_id}_{date_str}"
 
-            logger.info(f"Processing message from {user_email} in {space_name}: {message_text}")
+            logger.info(f"Processing message from user {username} (ID: {user_id}), chat_id: {chat_id}: {message_text}")
 
-            # Route based on message content
-            if 'UPLOAD' in message_text.upper() or 'LINK' in message_text.upper():
-                return self._handle_upload_request(session_id, space_name)
+            # Handle commands
+            if message_text.startswith('/start'):
+                return self._handle_start_command(chat_id, first_name)
 
-            elif message_text.upper() == 'DONE':
-                return self._handle_done_request(session_id)
+            elif message_text.startswith('/upload'):
+                return self._handle_upload_request(session_id, chat_id)
+
+            elif message_text.startswith('/done'):
+                return self._handle_done_request(session_id, chat_id)
+
+            elif message_text.startswith('/help'):
+                return self._handle_help_command(chat_id)
+
+            # Handle file uploads (audio, images, documents)
+            elif 'audio' in message or 'voice' in message or 'photo' in message or 'document' in message:
+                return self._handle_file_upload(session_id, chat_id, message)
+
+            # Handle regular text messages
+            elif message_text:
+                return self._handle_chat_message(session_id, chat_id, username, message_text)
 
             else:
-                return self._handle_chat_message(session_id, space_name, user_email, message_text)
+                return {'status': 'ignored'}
 
         except Exception as e:
-            logger.error(f"Error handling chat webhook: {e}")
-            return {'text': f'Error processing your request: {str(e)}'}
+            logger.error(f"Error handling Telegram webhook: {e}", exc_info=True)
+            return {'status': 'error', 'error': str(e)}
 
-    def _handle_upload_request(self, session_id: str, space_name: str) -> Dict[str, Any]:
-        """Handle upload/link request."""
-        # Ensure space name is saved
-        FirestoreManager.save_message(session_id, 'system', 'Upload requested', space_name)
+    def _handle_start_command(self, chat_id: int, first_name: str) -> Dict[str, Any]:
+        """Handle /start command."""
+        welcome_text = f"👋 Hello {first_name}! I'm the V2V2B Interrogator.\n\n"
+        welcome_text += "I'm a sarcastic but insightful Enterprise Architect here to extract architectural wisdom from you.\n\n"
+        welcome_text += "**Commands:**\n"
+        welcome_text += "/start - Show this welcome message\n"
+        welcome_text += "/upload - Get upload link for audio/images\n"
+        welcome_text += "/done - Complete session and create PR\n"
+        welcome_text += "/help - Show help information\n\n"
+        welcome_text += "Just send me a message to start our technical interview!"
+
+        self.telegram_client.send_message(chat_id, welcome_text)
+        return {'status': 'ok'}
+
+    def _handle_help_command(self, chat_id: int) -> Dict[str, Any]:
+        """Handle /help command."""
+        help_text = "**V2V2B Interrogator Help**\n\n"
+        help_text += "I'm here to conduct technical interviews and extract architectural knowledge.\n\n"
+        help_text += "**How to use:**\n"
+        help_text += "1. Just send me text messages - I'll ask probing questions\n"
+        help_text += "2. Use /upload to get a link for uploading audio or images\n"
+        help_text += "3. Send me audio files or images directly in Telegram\n"
+        help_text += "4. Use /done when finished to create a GitHub PR with our conversation\n\n"
+        help_text += "**Features:**\n"
+        help_text += "• Technical interview conversations\n"
+        help_text += "• Audio transcription and analysis\n"
+        help_text += "• Image analysis\n"
+        help_text += "• Automatic PR creation with session history\n"
+
+        self.telegram_client.send_message(chat_id, help_text)
+        return {'status': 'ok'}
+
+    def _handle_upload_request(self, session_id: str, chat_id: int) -> Dict[str, Any]:
+        """Handle /upload command."""
+        # Save chat_id for this session
+        FirestoreManager.save_message(session_id, 'system', 'Upload requested', str(chat_id))
 
         upload_url = f"{FUNCTION_URL}?mode=ui&session={session_id}"
-        return {
-            'text': f'📎 Ready to upload? Click here:\n{upload_url}\n\n(Upload audio or images for analysis)'
-        }
+        message = f"📎 Ready to upload? Click here:\n{upload_url}\n\n"
+        message += "(Upload audio or images for analysis)\n\n"
+        message += "💡 Tip: You can also send files directly in this Telegram chat!"
 
-    def _handle_done_request(self, session_id: str) -> Dict[str, Any]:
-        """Handle session completion request."""
+        self.telegram_client.send_message(chat_id, message)
+        return {'status': 'ok'}
+
+    def _handle_done_request(self, session_id: str, chat_id: int) -> Dict[str, Any]:
+        """Handle /done command - complete session."""
         try:
             history = FirestoreManager.get_session_history(session_id)
 
             if not history:
-                return {'text': 'No session history found. Start chatting first!'}
+                self.telegram_client.send_message(chat_id, '❌ No session history found. Start chatting first!')
+                return {'status': 'ok'}
 
             # Create PR
             pr_url = self.github_manager.create_pr_from_session(session_id, history)
 
-            return {
-                'text': f'✅ Session complete! Pull request created:\n{pr_url}'
-            }
+            message = f'✅ Session complete! Pull request created:\n{pr_url}'
+            self.telegram_client.send_message(chat_id, message)
+            return {'status': 'ok'}
         except Exception as e:
-            logger.error(f"Error handling DONE request: {e}")
-            return {'text': f'Error creating PR: {str(e)}'}
+            logger.error(f"Error handling /done request: {e}")
+            self.telegram_client.send_message(chat_id, f'❌ Error creating PR: {str(e)}')
+            return {'status': 'error'}
 
-    def _handle_chat_message(self, session_id: str, space_name: str, user_email: str, message_text: str) -> Dict[str, Any]:
+    def _handle_file_upload(self, session_id: str, chat_id: int, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle file uploads via Telegram (audio, voice, photo, document)."""
+        try:
+            # Telegram file handling would require downloading the file via Bot API
+            # For now, redirect to web upload UI
+            info_text = "📎 To upload files, please use the web interface:\n"
+            info_text += f"{FUNCTION_URL}?mode=ui&session={session_id}\n\n"
+            info_text += "🚧 Direct Telegram file uploads coming soon!"
+
+            self.telegram_client.send_message(chat_id, info_text)
+            return {'status': 'ok'}
+        except Exception as e:
+            logger.error(f"Error handling file upload: {e}")
+            return {'status': 'error'}
+
+    def _handle_chat_message(self, session_id: str, chat_id: int, username: str, message_text: str) -> Dict[str, Any]:
         """Handle regular chat message."""
         try:
-            # Save user message
-            FirestoreManager.save_message(session_id, 'user', message_text, space_name)
+            # Save user message (use chat_id as space_name)
+            FirestoreManager.save_message(session_id, 'user', message_text, str(chat_id))
 
             # Get history
             history = FirestoreManager.get_session_history(session_id)
@@ -776,12 +842,16 @@ class ChatWebhookHandler:
             bot_response = self.gemini.chat_response(message_text, history)
 
             # Save bot response
-            FirestoreManager.save_message(session_id, 'assistant', bot_response, space_name)
+            FirestoreManager.save_message(session_id, 'assistant', bot_response, str(chat_id))
 
-            return {'text': bot_response}
+            # Send response via Telegram
+            self.telegram_client.send_message(chat_id, bot_response)
+
+            return {'status': 'ok'}
         except Exception as e:
             logger.error(f"Error handling chat message: {e}")
-            return {'text': 'Sorry, I encountered an error processing your message.'}
+            self.telegram_client.send_message(chat_id, '❌ Sorry, I encountered an error processing your message.')
+            return {'status': 'error'}
 
 
 class UploadHandler:
@@ -789,7 +859,7 @@ class UploadHandler:
 
     def __init__(self):
         self.gemini = GeminiClient()
-        self.chat_client = GoogleChatClient()
+        self.telegram_client = TelegramClient()
 
     def handle(self, session_id: str, file_data: bytes, filename: str, content_type: str) -> str:
         """Process uploaded file."""
@@ -806,13 +876,17 @@ class UploadHandler:
                 f"[FILE ANALYSIS: {filename}]\n\n{analysis}"
             )
 
-            # Get space name and send message back to chat
-            space_name = FirestoreManager.get_space_name(session_id)
-            if space_name:
-                message = f"📎 File analyzed: *{filename}*\n\n{analysis}"
-                self.chat_client.send_message(space_name, message)
+            # Get chat_id from space_name (stored as string) and send message back to Telegram
+            chat_id_str = FirestoreManager.get_space_name(session_id)
+            if chat_id_str:
+                try:
+                    chat_id = int(chat_id_str)
+                    message = f"📎 File analyzed: *{filename}*\n\n{analysis}"
+                    self.telegram_client.send_message(chat_id, message)
+                except ValueError:
+                    logger.warning(f"Invalid chat_id format: {chat_id_str}")
             else:
-                logger.warning(f"No space name found for session {session_id}")
+                logger.warning(f"No chat_id found for session {session_id}")
 
             return self._success_html()
         except Exception as e:
@@ -1272,19 +1346,20 @@ def entry_point(request):
     Routes requests based on method and query parameters.
     """
     try:
-        # Get query parameters
+        # Get query parameters and path
         mode = request.args.get('mode', '')
         session_id = request.args.get('session', '')
+        path = request.path
 
-        # Route A: Chat Webhook (POST /)
-        if request.method == 'POST' and not mode:
-            # Parse Google Chat event
-            event_data = request.get_json(silent=True)
-            if not event_data:
+        # Route A: Telegram Webhook (POST /telegram)
+        if request.method == 'POST' and path == '/telegram':
+            # Parse Telegram Update
+            update_data = request.get_json(silent=True)
+            if not update_data:
                 return jsonify({'error': 'Invalid request body'}), 400
 
-            handler = ChatWebhookHandler()
-            response = handler.handle(event_data)
+            handler = TelegramWebhookHandler()
+            response = handler.handle(update_data)
             return jsonify(response)
 
         # Route B: Upload UI (GET /?mode=ui&session=...)
@@ -1344,14 +1419,14 @@ def entry_point(request):
                 'service': 'V2V2B Interrogator',
                 'version': '2.0.0',
                 'endpoints': {
-                    'chat_webhook': 'POST /',
+                    'telegram_webhook': 'POST /telegram',
                     'upload_ui': 'GET /?mode=ui&session=SESSION_ID',
                     'file_upload': 'POST /?mode=upload&session=SESSION_ID',
                     'drive_scan': 'GET /?mode=scan',
                     'drive_webhook': 'POST /?mode=drive_webhook'
                 },
                 'features': [
-                    'Google Chat bot',
+                    'Telegram bot',
                     'Multimodal file analysis',
                     'Google Drive monitoring',
                     'Transcript processing (.txt, .m4a)',

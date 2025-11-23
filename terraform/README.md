@@ -4,7 +4,7 @@ Infrastructure-as-Code deployment for the V2V2B Interrogator: An AI-powered syst
 
 ## ✨ Features
 
-- 🤖 **Google Chat Bot** - Sarcastic Enterprise Architect conducting technical interviews
+- 🤖 **Telegram Bot** - Sarcastic Enterprise Architect conducting technical interviews
 - 📂 **Google Drive Monitor** - Auto-detects new transcript files (.txt, .m4a)
 - 🎙️ **Audio Transcription** - Converts .m4a files to text using Gemini AI
 - 🧠 **AI Analysis** - Extracts insights, patterns, and technical concepts
@@ -70,6 +70,7 @@ nano terraform.tfvars
 Required variables:
 - `gcp_project` - Your GCP project ID
 - `github_token` - GitHub Personal Access Token
+- `telegram_bot_token` - Telegram Bot Token from @BotFather
 - `repo_name` - GitHub repository (username/repo)
 
 Optional Google Drive variables:
@@ -113,6 +114,109 @@ echo 'function_url = "$(terraform output -raw function_url)"' >> terraform.tfvar
 
 # Apply again to update the environment variable
 terraform apply
+```
+
+## 🤖 Telegram Bot Setup
+
+### 1. Create a Telegram Bot
+
+1. Open Telegram and search for [@BotFather](https://t.me/botfather)
+2. Send `/newbot` command
+3. Follow the prompts:
+   - Choose a **display name** (e.g., "V2V2B Interrogator")
+   - Choose a **username** (must end in 'bot', e.g., "v2v2b_interrogator_bot")
+4. **Save the bot token** - you'll need this for the next step
+
+Example token format: `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`
+
+### 2. Configure the Bot Token
+
+Add the bot token to your `terraform.tfvars`:
+
+```hcl
+telegram_bot_token = "YOUR_BOT_TOKEN_FROM_BOTFATHER"
+```
+
+**For GitHub Actions**: Add as a repository secret named `TELEGRAM_BOT_TOKEN`
+
+### 3. Register the Webhook
+
+After deployment, register your Cloud Function URL as the webhook:
+
+```bash
+# Get your function URL
+FUNCTION_URL=$(terraform output -raw function_url)
+
+# Get your bot token from terraform.tfvars or environment
+BOT_TOKEN="your_bot_token_here"
+
+# Register the webhook
+curl -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=${FUNCTION_URL}/telegram"
+```
+
+**Expected response:**
+```json
+{
+  "ok": true,
+  "result": true,
+  "description": "Webhook was set"
+}
+```
+
+### 4. Verify Webhook Setup
+
+```bash
+curl "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
+```
+
+**Expected response:**
+```json
+{
+  "ok": true,
+  "result": {
+    "url": "https://your-function-url/telegram",
+    "has_custom_certificate": false,
+    "pending_update_count": 0
+  }
+}
+```
+
+### 5. Test the Bot
+
+1. Open Telegram
+2. Search for your bot by username (e.g., `@v2v2b_interrogator_bot`)
+3. Send `/start` to begin
+4. The bot should respond with a welcome message
+
+### Available Commands
+
+- `/start` - Show welcome message and available commands
+- `/help` - Display help information
+- `/upload` - Get upload link for audio/images
+- `/done` - Complete session and create GitHub PR
+- Send any text - Start technical interview conversation
+
+### Troubleshooting
+
+**Bot not responding:**
+```bash
+# Check function logs
+gcloud functions logs read v2v2b-interrogator --region=us-central1 --gen2 --limit=50
+
+# Check webhook status
+curl "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
+
+# Test function health
+curl "${FUNCTION_URL}/"
+```
+
+**Reset webhook:**
+```bash
+# Delete webhook
+curl -X POST "https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook"
+
+# Set again
+curl -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=${FUNCTION_URL}/telegram"
 ```
 
 ## 📂 Google Drive Setup (Optional)
@@ -205,12 +309,12 @@ GET /
 ```
 Returns service status and available endpoints.
 
-### Google Chat Webhook
+### Telegram Webhook
 ```bash
-POST /
+POST /telegram
 Content-Type: application/json
 ```
-Receives Google Chat events for interactive conversations.
+Receives Telegram Update events for interactive conversations.
 
 ### Upload UI
 ```bash

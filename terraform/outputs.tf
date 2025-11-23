@@ -28,9 +28,9 @@ output "function_bucket" {
   value       = google_storage_bucket.function_bucket.name
 }
 
-output "google_chat_webhook_url" {
-  description = "URL to use as Google Chat webhook endpoint"
-  value       = google_cloudfunctions2_function.v2v2b_interrogator.service_config[0].uri
+output "telegram_webhook_url" {
+  description = "URL to use as Telegram webhook endpoint"
+  value       = "${google_cloudfunctions2_function.v2v2b_interrogator.service_config[0].uri}/telegram"
 }
 
 output "upload_ui_url_template" {
@@ -55,12 +55,11 @@ output "deployment_summary" {
   Next Steps:
   ================================================================
 
-  1. Configure Google Chat App:
-     - Go to: https://console.cloud.google.com/apis/api/chat.googleapis.com
-     - Click "Configuration" → "Create Chat App"
-     - Set HTTP endpoint to: ${google_cloudfunctions2_function.v2v2b_interrogator.service_config[0].uri}
-     - Enable "Receive 1:1 messages" and "Join spaces"
-     - Save and Publish
+  1. Configure Telegram Webhook:
+     - Register the webhook with Telegram API:
+       curl -X POST "https://api.telegram.org/bot<YOUR_TOKEN>/setWebhook?url=${google_cloudfunctions2_function.v2v2b_interrogator.service_config[0].uri}/telegram"
+     - Verify webhook is set:
+       curl "https://api.telegram.org/bot<YOUR_TOKEN>/getWebhookInfo"
 
   2. Configure Google Drive Access (Optional):
      - Share your Drive folders with: ${google_service_account.function_sa.email}
@@ -72,9 +71,9 @@ output "deployment_summary" {
      function_url = "${google_cloudfunctions2_function.v2v2b_interrogator.service_config[0].uri}"
 
   4. Test the bot:
-     - Open Google Chat
-     - Search for "${var.function_name}"
-     - Send a message!
+     - Open Telegram
+     - Search for your bot by username
+     - Send /start to begin a conversation
 
   5. Test Drive scan (if configured):
      curl "${google_cloudfunctions2_function.v2v2b_interrogator.service_config[0].uri}?mode=scan"
