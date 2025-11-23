@@ -1183,14 +1183,34 @@ class TelegramWebhookHandler:
         try:
             file_id = document['file_id']
             filename = document.get('file_name', 'document.txt')
+            mime_type = document.get('mime_type', 'unknown')
+            file_size = document.get('file_size', 0)
 
+            logger.info(f"Processing text file: {filename}, MIME: {mime_type}, Size: {file_size}, FileID: {file_id}")
             self.telegram_client.send_message(chat_id, f'📄 Processing text file: *{filename}*...')
 
             # Download file
-            file_data = self.telegram_client.download_file(file_id)
-            if not file_data:
-                self.telegram_client.send_message(chat_id, '❌ Failed to download file.')
+            logger.info(f"Attempting to download file {file_id}")
+            try:
+                file_data = self.telegram_client.download_file(file_id)
+            except Exception as download_error:
+                logger.error(f"Exception during download: {download_error}", exc_info=True)
+                self.telegram_client.send_message(
+                    chat_id,
+                    f'❌ Failed to download file.\n\nError: {str(download_error)}\n\nPlease contact support.'
+                )
                 return {'status': 'error'}
+
+            if not file_data:
+                logger.error(f"Download returned None for file {file_id}")
+                self.telegram_client.send_message(
+                    chat_id,
+                    f'❌ Failed to download file.\n\nFile ID: `{file_id}`\nFilename: `{filename}`\n\nThe download returned empty. Please try again or contact support.'
+                )
+                return {'status': 'error'}
+
+            logger.info(f"Successfully downloaded {len(file_data)} bytes for {filename}")
+            self.telegram_client.send_message(chat_id, f'✅ Downloaded {len(file_data)} bytes. Analyzing...')
 
             # Decode text content
             try:
