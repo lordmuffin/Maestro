@@ -146,6 +146,12 @@ jobs:
             -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
             google_project_service.cloud_run "$PROJECT_ID/run.googleapis.com" 2>/dev/null || true
 
+          # Import Firestore rules release (if it exists)
+          terraform import -var="gcp_project=$PROJECT_ID" \
+            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
+            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
+            'google_firebaserules_release.firestore[0]' "projects/$PROJECT_ID/releases/cloud.firestore" 2>/dev/null || true
+
           echo "Import step completed (errors are expected if resources don't exist or are already imported)"
 
       # Temporarily disabled for testing

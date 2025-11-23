@@ -191,11 +191,8 @@ resource "google_project_iam_member" "aiplatform_user" {
   member  = "serviceAccount:${google_service_account.function_sa.email}"
 }
 
-resource "google_project_iam_member" "chat_bot" {
-  project = var.gcp_project
-  role    = "roles/chat.bot"
-  member  = "serviceAccount:${google_service_account.function_sa.email}"
-}
+# Note: roles/chat.bot is not required for Cloud Functions receiving Google Chat webhooks
+# The function only needs to be publicly accessible via google_cloud_run_service_iam_member.public_access
 
 resource "google_project_iam_member" "logging_writer" {
   project = var.gcp_project
