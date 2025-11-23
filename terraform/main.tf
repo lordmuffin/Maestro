@@ -118,6 +118,27 @@ data "archive_file" "function_source" {
     content  = file("${path.module}/requirements.txt")
     filename = "requirements.txt"
   }
+
+  # Include prompt files
+  source {
+    content  = file("${path.module}/../prompts/telegram_chat_prompt.md")
+    filename = "prompts/telegram_chat_prompt.md"
+  }
+
+  source {
+    content  = file("${path.module}/../prompts/multimodal_analysis_prompt.md")
+    filename = "prompts/multimodal_analysis_prompt.md"
+  }
+
+  source {
+    content  = file("${path.module}/../prompts/transcript_analysis_prompt.md")
+    filename = "prompts/transcript_analysis_prompt.md"
+  }
+
+  source {
+    content  = file("${path.module}/../prompts/interrogation_questions_prompt.md")
+    filename = "prompts/interrogation_questions_prompt.md"
+  }
 }
 
 # Upload function source to GCS

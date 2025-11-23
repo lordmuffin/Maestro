@@ -36,7 +36,8 @@
       "Bash(kubectl describe:*)",
       "Bash(kubectl apply:*)",
       "Bash(kubectl delete:*)",
-      "Bash(terraform fmt:*)"
+      "Bash(terraform fmt:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

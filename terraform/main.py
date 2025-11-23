@@ -10,6 +10,7 @@ import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 import base64
+from pathlib import Path
 
 from flask import Flask, request, jsonify, make_response
 import functions_framework
@@ -45,31 +46,72 @@ db = firestore.Client(project=GCP_PROJECT)
 # Initialize Vertex AI
 vertexai.init(project=GCP_PROJECT, location="us-central1")
 
-# System prompts
-CHAT_SYSTEM_PROMPT = """You are a sarcastic but insightful Enterprise Architect conducting a technical interview via Telegram.
-Your goal is to extract detailed architectural knowledge from the user through probing questions.
-Be direct, occasionally sarcastic, but always professional. Ask follow-up questions that dig deeper.
-Focus on: design decisions, trade-offs, scalability, security, and real-world implementation challenges."""
 
-MULTIMODAL_SYSTEM_PROMPT = """Analyze this raw input (audio or image) and extract all architectural concepts,
-technical details, design patterns, and implementation insights. Be thorough and structured in your analysis."""
+# Prompt Loading Functions
+def load_prompt(prompt_filename: str) -> str:
+    """Load a prompt from the prompts directory."""
+    try:
+        # Try to find prompts directory relative to this file
+        prompts_dir = Path(__file__).parent.parent / "prompts"
 
-TRANSCRIPT_ANALYSIS_PROMPT = """Analyze this transcript and extract:
+        # If not found, try current directory (for Cloud Function deployment)
+        if not prompts_dir.exists():
+            prompts_dir = Path("prompts")
+
+        prompt_path = prompts_dir / prompt_filename
+
+        if prompt_path.exists():
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                logger.info(f"Loaded prompt from {prompt_path}")
+                return content
+        else:
+            logger.warning(f"Prompt file not found: {prompt_path}")
+            return get_fallback_prompt(prompt_filename)
+    except Exception as e:
+        logger.error(f"Error loading prompt {prompt_filename}: {e}")
+        return get_fallback_prompt(prompt_filename)
+
+
+def get_fallback_prompt(prompt_filename: str) -> str:
+    """Return fallback prompts if files cannot be loaded."""
+    fallbacks = {
+        "telegram_chat_prompt.md": """You are a professional technical interview assistant for the Maestro AI Executive Assistant.
+Your goal is to extract valuable technical knowledge through respectful, focused conversation.
+Be professional, curious, and methodical. Ask clarifying questions to uncover design decisions,
+implementation details, and architectural insights.""",
+
+        "multimodal_analysis_prompt.md": """Analyze this audio or image content and extract meaningful information.
+Provide structured insights including: key topics, technical concepts, action items, and areas needing clarification.
+Be accurate, thorough, and well-organized in your analysis.""",
+
+        "transcript_analysis_prompt.md": """Analyze this transcript and extract:
 1. Key architectural concepts and design patterns mentioned
 2. Technical decisions and trade-offs discussed
 3. Implementation details and code examples
 4. Pain points, challenges, or lessons learned
 5. Questions that would help dig deeper into this topic
 
-Provide a structured summary with clear sections."""
+Provide a structured summary with clear sections.""",
 
-INTERROGATION_PR_PROMPT = """Based on this transcript analysis, generate:
+        "interrogation_questions_prompt.md": """Based on this transcript analysis, generate:
 1. A list of 5-10 probing questions to extract more details
 2. Areas that need clarification or deeper exploration
 3. Follow-up topics that should be covered
 4. Connections to related architectural concepts
 
 Format as a markdown checklist suitable for a GitHub PR."""
+    }
+
+    logger.warning(f"Using fallback prompt for {prompt_filename}")
+    return fallbacks.get(prompt_filename, "You are a helpful AI assistant.")
+
+
+# Load system prompts from files
+CHAT_SYSTEM_PROMPT = load_prompt("telegram_chat_prompt.md")
+MULTIMODAL_SYSTEM_PROMPT = load_prompt("multimodal_analysis_prompt.md")
+TRANSCRIPT_ANALYSIS_PROMPT = load_prompt("transcript_analysis_prompt.md")
+INTERROGATION_PR_PROMPT = load_prompt("interrogation_questions_prompt.md")
 
 
 class FirestoreManager:
