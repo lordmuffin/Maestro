@@ -132,18 +132,28 @@ gcloud alpha storage ls --folders
 
 #### 2. Configure Drive Access
 
+**IMPORTANT**: Google Drive access is granted by sharing folders, not through project IAM roles.
+
 The Cloud Function's service account needs access to your Drive folders:
 
 ```bash
 # Get the service account email
 terraform output service_account_email
 
-# Share your Drive folders with this service account:
-# 1. Open Google Drive
-# 2. Right-click the folder → Share
-# 3. Add the service account email with "Viewer" access (for transcript folder)
-# 4. Add with "Editor" access (for Obsidian folder - to write summaries)
+# Example output: v2v2b-interrogator-sa@your-project.iam.gserviceaccount.com
 ```
+
+**Share your Drive folders with this service account**:
+1. Open Google Drive in your browser
+2. Navigate to your transcript folder
+3. Right-click the folder → Share
+4. Add the service account email (from above) with **"Viewer"** access
+5. Repeat for your Obsidian folder with **"Editor"** access
+
+**Why this is required**:
+- There is no project-level IAM role for Drive access
+- Access must be granted on specific folders
+- The service account acts like a regular user that needs folder permissions
 
 #### 3. Add to terraform.tfvars
 

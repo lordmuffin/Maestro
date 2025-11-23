@@ -208,12 +208,14 @@ resource "google_project_iam_member" "logging_writer" {
   member  = "serviceAccount:${google_service_account.function_sa.email}"
 }
 
-# Grant Google Drive access for reading transcripts and writing to Obsidian folder
-resource "google_project_iam_member" "drive_user" {
-  project = var.gcp_project
-  role    = "roles/drive.file"
-  member  = "serviceAccount:${google_service_account.function_sa.email}"
-}
+# Google Drive Access:
+# Note: Drive access is granted by sharing specific Drive folders with the service account.
+# There is no project-level IAM role for Drive access. Instead:
+# 1. Get the service account email: terraform output service_account_email
+# 2. Share your Drive folders with this email address:
+#    - Transcript folder: Grant "Viewer" access
+#    - Obsidian folder: Grant "Editor" access
+# The Drive API service must be enabled (handled by google_project_service.drive)
 
 # Allow unauthenticated access to the function (for Google Chat webhook)
 resource "google_cloud_run_service_iam_member" "public_access" {

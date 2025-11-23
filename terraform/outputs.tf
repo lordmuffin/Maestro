@@ -62,15 +62,24 @@ output "deployment_summary" {
      - Enable "Receive 1:1 messages" and "Join spaces"
      - Save and Publish
 
-  2. Update terraform.tfvars with the function URL:
+  2. Configure Google Drive Access (Optional):
+     - Share your Drive folders with: ${google_service_account.function_sa.email}
+     - Transcript folder: Grant "Viewer" access
+     - Obsidian folder: Grant "Editor" access
+     - Update terraform.tfvars with folder IDs and re-apply
+
+  3. Update terraform.tfvars with the function URL:
      function_url = "${google_cloudfunctions2_function.v2v2b_interrogator.service_config[0].uri}"
 
-  3. Test the bot:
+  4. Test the bot:
      - Open Google Chat
      - Search for "${var.function_name}"
      - Send a message!
 
-  4. View logs:
+  5. Test Drive scan (if configured):
+     curl "${google_cloudfunctions2_function.v2v2b_interrogator.service_config[0].uri}?mode=scan"
+
+  6. View logs:
      gcloud functions logs read ${google_cloudfunctions2_function.v2v2b_interrogator.name} \
        --region=${google_cloudfunctions2_function.v2v2b_interrogator.location} \
        --gen2 --limit=50
