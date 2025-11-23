@@ -197,14 +197,15 @@ jobs:
           terraform_wrapper: false
 
       - name: Authenticate to Google Cloud (Workload Identity)
-        if: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        id: auth-workload
+        continue-on-error: true
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Authenticate to Google Cloud (Service Account Key)
-        if: ${{ secrets.GCP_CREDENTIALS && !secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        if: steps.auth-workload.outcome == 'failure'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_CREDENTIALS }}
@@ -407,7 +408,7 @@ jobs:
           fi
 
       - name: Send Slack Notification
-        if: ${{ secrets.SLACK_WEBHOOK }}
+        continue-on-error: true
         uses: slackapi/slack-github-action@v1
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK }}
