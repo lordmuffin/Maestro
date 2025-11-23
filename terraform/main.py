@@ -910,20 +910,34 @@ class TelegramClient:
     def send_message(self, chat_id: int, text: str, reply_markup=None) -> bool:
         """Send a message to a Telegram chat."""
         try:
-            # Run async send_message in sync context
-            asyncio.run(self.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                parse_mode='Markdown',
-                reply_markup=reply_markup
-            ))
+            async def _send():
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode='Markdown',
+                    reply_markup=reply_markup
+                )
+
+            # Handle both new event loop and existing event loop scenarios
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, _send())
+                        future.result(timeout=10)
+                else:
+                    loop.run_until_complete(_send())
+            except RuntimeError:
+                asyncio.run(_send())
+
             logger.info(f"Message sent to chat_id {chat_id}")
             return True
         except TelegramError as e:
-            logger.error(f"Error sending message to Telegram: {e}")
+            logger.error(f"Error sending message to Telegram: {e}", exc_info=True)
             return False
         except Exception as e:
-            logger.error(f"Unexpected error sending message to Telegram: {e}")
+            logger.error(f"Unexpected error sending message to Telegram: {e}", exc_info=True)
             return False
 
     def download_file(self, file_id: str) -> Optional[bytes]:
@@ -934,27 +948,56 @@ class TelegramClient:
                 file_bytes = await file.download_as_bytearray()
                 return bytes(file_bytes)
 
-            result = asyncio.run(_download())
-            logger.info(f"Downloaded file {file_id}")
+            # Handle both new event loop and existing event loop scenarios
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If loop is already running, create a new one in a thread
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, _download())
+                        result = future.result(timeout=30)
+                else:
+                    result = loop.run_until_complete(_download())
+            except RuntimeError:
+                # No event loop, create one
+                result = asyncio.run(_download())
+
+            logger.info(f"Downloaded file {file_id}, size: {len(result)} bytes")
             return result
         except TelegramError as e:
-            logger.error(f"Error downloading file from Telegram: {e}")
+            logger.error(f"Error downloading file from Telegram: {e}", exc_info=True)
             return None
         except Exception as e:
-            logger.error(f"Unexpected error downloading file: {e}")
+            logger.error(f"Unexpected error downloading file: {e}", exc_info=True)
             return None
 
     def answer_callback_query(self, callback_query_id: str, text: str = None) -> bool:
         """Answer a callback query from inline keyboard."""
         try:
-            asyncio.run(self.bot.answer_callback_query(callback_query_id=callback_query_id, text=text))
+            async def _answer():
+                await self.bot.answer_callback_query(callback_query_id=callback_query_id, text=text)
+
+            # Handle both new event loop and existing event loop scenarios
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, _answer())
+                        future.result(timeout=10)
+                else:
+                    loop.run_until_complete(_answer())
+            except RuntimeError:
+                asyncio.run(_answer())
+
             logger.info(f"Answered callback query {callback_query_id}")
             return True
         except TelegramError as e:
-            logger.error(f"Error answering callback query: {e}")
+            logger.error(f"Error answering callback query: {e}", exc_info=True)
             return False
         except Exception as e:
-            logger.error(f"Unexpected error answering callback query: {e}")
+            logger.error(f"Unexpected error answering callback query: {e}", exc_info=True)
             return False
 
 
