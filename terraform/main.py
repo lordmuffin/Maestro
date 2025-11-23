@@ -23,9 +23,10 @@ from github import Github
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from google.auth import default
-from telegram import Bot, Update
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import TelegramError
 import asyncio
+import io
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -244,6 +245,58 @@ class FirestoreManager:
         except Exception as e:
             logger.error(f"Error retrieving space name: {e}")
             return None
+
+    @staticmethod
+    def save_pending_validation(validation_id: str, session_id: str, chat_id: int,
+                               file_type: str, filename: str, content: str,
+                               structured_notes: str, file_data: bytes = None) -> None:
+        """Save a file upload awaiting user validation."""
+        try:
+            validation_ref = get_db().collection('pending_validations').document(validation_id)
+            validation_data = {
+                'validation_id': validation_id,
+                'session_id': session_id,
+                'chat_id': chat_id,
+                'file_type': file_type,
+                'filename': filename,
+                'content': content,
+                'structured_notes': structured_notes,
+                'created_at': firestore.SERVER_TIMESTAMP,
+                'status': 'awaiting_validation'
+            }
+            # Store file_data separately if provided (for binary files)
+            if file_data:
+                validation_data['file_data_base64'] = base64.b64encode(file_data).decode('utf-8')
+
+            validation_ref.set(validation_data)
+            logger.info(f"Saved pending validation {validation_id}")
+        except Exception as e:
+            logger.error(f"Error saving pending validation: {e}")
+            raise
+
+    @staticmethod
+    def get_pending_validation(validation_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a pending validation."""
+        try:
+            validation_ref = get_db().collection('pending_validations').document(validation_id)
+            doc = validation_ref.get()
+            if doc.exists:
+                return doc.to_dict()
+            return None
+        except Exception as e:
+            logger.error(f"Error retrieving pending validation: {e}")
+            return None
+
+    @staticmethod
+    def delete_pending_validation(validation_id: str) -> None:
+        """Delete a pending validation."""
+        try:
+            validation_ref = get_db().collection('pending_validations').document(validation_id)
+            validation_ref.delete()
+            logger.info(f"Deleted pending validation {validation_id}")
+        except Exception as e:
+            logger.error(f"Error deleting pending validation: {e}")
+            raise
 
 
 class GoogleDriveClient:
@@ -835,11 +888,16 @@ class TelegramClient:
             logger.error(f"Failed to create Telegram Bot: {e}")
             raise
 
-    def send_message(self, chat_id: int, text: str) -> bool:
+    def send_message(self, chat_id: int, text: str, reply_markup=None) -> bool:
         """Send a message to a Telegram chat."""
         try:
             # Run async send_message in sync context
-            asyncio.run(self.bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown'))
+            asyncio.run(self.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            ))
             logger.info(f"Message sent to chat_id {chat_id}")
             return True
         except TelegramError as e:
@@ -847,6 +905,37 @@ class TelegramClient:
             return False
         except Exception as e:
             logger.error(f"Unexpected error sending message to Telegram: {e}")
+            return False
+
+    def download_file(self, file_id: str) -> Optional[bytes]:
+        """Download a file from Telegram using file_id."""
+        try:
+            async def _download():
+                file = await self.bot.get_file(file_id)
+                file_bytes = await file.download_as_bytearray()
+                return bytes(file_bytes)
+
+            result = asyncio.run(_download())
+            logger.info(f"Downloaded file {file_id}")
+            return result
+        except TelegramError as e:
+            logger.error(f"Error downloading file from Telegram: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error downloading file: {e}")
+            return None
+
+    def answer_callback_query(self, callback_query_id: str, text: str = None) -> bool:
+        """Answer a callback query from inline keyboard."""
+        try:
+            asyncio.run(self.bot.answer_callback_query(callback_query_id=callback_query_id, text=text))
+            logger.info(f"Answered callback query {callback_query_id}")
+            return True
+        except TelegramError as e:
+            logger.error(f"Error answering callback query: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error answering callback query: {e}")
             return False
 
 
@@ -861,6 +950,11 @@ class TelegramWebhookHandler:
     def handle(self, update_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process incoming Telegram webhook."""
         try:
+            # Check for callback query (inline button presses)
+            callback_query = update_data.get('callback_query')
+            if callback_query:
+                return self._handle_callback_query(callback_query)
+
             # Parse Telegram Update object
             message = update_data.get('message', {})
 
@@ -980,18 +1074,357 @@ class TelegramWebhookHandler:
             return {'status': 'error'}
 
     def _handle_file_upload(self, session_id: str, chat_id: int, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle file uploads via Telegram (audio, voice, photo, document)."""
+        """Handle file uploads via Telegram (audio, voice, photo, document, video)."""
         try:
-            # Telegram file handling would require downloading the file via Bot API
-            # For now, redirect to web upload UI
-            info_text = "📎 To upload files, please use the web interface:\n"
-            info_text += f"{FUNCTION_URL}?mode=ui&session={session_id}\n\n"
-            info_text += "🚧 Direct Telegram file uploads coming soon!"
+            # Determine file type and process accordingly
+            if 'voice' in message:
+                return self._process_voice_message(session_id, chat_id, message['voice'])
+            elif 'video' in message:
+                video = message['video']
+                if video.get('mime_type') == 'video/mp4':
+                    return self._process_video_file(session_id, chat_id, video)
+                else:
+                    self.telegram_client.send_message(chat_id, '❌ Only MP4 videos are supported.')
+                    return {'status': 'error'}
+            elif 'document' in message:
+                document = message['document']
+                if document.get('mime_type') == 'text/plain' or document.get('file_name', '').endswith('.txt'):
+                    return self._process_text_file(session_id, chat_id, document)
+                else:
+                    self.telegram_client.send_message(chat_id, '❌ Only .txt files are supported for documents.')
+                    return {'status': 'error'}
+            elif 'audio' in message or 'photo' in message:
+                # Redirect audio and photos to web UI (can be extended later)
+                info_text = "📎 For audio and images, please use the web interface:\n"
+                info_text += f"{FUNCTION_URL}?mode=ui&session={session_id}"
+                self.telegram_client.send_message(chat_id, info_text)
+                return {'status': 'ok'}
+            else:
+                return {'status': 'ignored'}
 
-            self.telegram_client.send_message(chat_id, info_text)
-            return {'status': 'ok'}
         except Exception as e:
-            logger.error(f"Error handling file upload: {e}")
+            logger.error(f"Error handling file upload: {e}", exc_info=True)
+            self.telegram_client.send_message(chat_id, f'❌ Error processing file: {str(e)}')
+            return {'status': 'error'}
+
+    def _process_text_file(self, session_id: str, chat_id: int, document: Dict[str, Any]) -> Dict[str, Any]:
+        """Process uploaded text file."""
+        try:
+            file_id = document['file_id']
+            filename = document.get('file_name', 'document.txt')
+
+            self.telegram_client.send_message(chat_id, f'📄 Processing text file: *{filename}*...')
+
+            # Download file
+            file_data = self.telegram_client.download_file(file_id)
+            if not file_data:
+                self.telegram_client.send_message(chat_id, '❌ Failed to download file.')
+                return {'status': 'error'}
+
+            # Decode text content
+            try:
+                content = file_data.decode('utf-8')
+            except UnicodeDecodeError:
+                content = file_data.decode('latin-1')  # Fallback encoding
+
+            # Generate structured notes using validation prompt
+            structured_notes = self._generate_structured_notes(content, filename, 'text')
+
+            # Create validation ID
+            validation_id = f"{session_id}_{file_id}"
+
+            # Save to pending validations
+            FirestoreManager.save_pending_validation(
+                validation_id=validation_id,
+                session_id=session_id,
+                chat_id=chat_id,
+                file_type='text',
+                filename=filename,
+                content=content,
+                structured_notes=structured_notes
+            )
+
+            # Send preview with validation buttons
+            self._send_validation_prompt(chat_id, filename, structured_notes, validation_id)
+
+            return {'status': 'ok'}
+
+        except Exception as e:
+            logger.error(f"Error processing text file: {e}", exc_info=True)
+            self.telegram_client.send_message(chat_id, f'❌ Error processing text file: {str(e)}')
+            return {'status': 'error'}
+
+    def _process_video_file(self, session_id: str, chat_id: int, video: Dict[str, Any]) -> Dict[str, Any]:
+        """Process uploaded MP4 video file."""
+        try:
+            file_id = video['file_id']
+            filename = video.get('file_name', 'video.mp4')
+
+            self.telegram_client.send_message(chat_id, f'🎥 Processing video: *{filename}*...')
+
+            # Download video
+            file_data = self.telegram_client.download_file(file_id)
+            if not file_data:
+                self.telegram_client.send_message(chat_id, '❌ Failed to download video.')
+                return {'status': 'error'}
+
+            # Analyze with Gemini (multimodal supports video)
+            analysis = self.gemini.analyze_multimodal(file_data, 'video/mp4', filename)
+
+            # Generate structured notes
+            structured_notes = self._generate_structured_notes(analysis, filename, 'video')
+
+            # Create validation ID
+            validation_id = f"{session_id}_{file_id}"
+
+            # Save to pending validations (store file data for later indexing)
+            FirestoreManager.save_pending_validation(
+                validation_id=validation_id,
+                session_id=session_id,
+                chat_id=chat_id,
+                file_type='video',
+                filename=filename,
+                content=analysis,
+                structured_notes=structured_notes,
+                file_data=file_data
+            )
+
+            # Send preview with validation buttons
+            self._send_validation_prompt(chat_id, filename, structured_notes, validation_id)
+
+            return {'status': 'ok'}
+
+        except Exception as e:
+            logger.error(f"Error processing video file: {e}", exc_info=True)
+            self.telegram_client.send_message(chat_id, f'❌ Error processing video: {str(e)}')
+            return {'status': 'error'}
+
+    def _process_voice_message(self, session_id: str, chat_id: int, voice: Dict[str, Any]) -> Dict[str, Any]:
+        """Process Telegram voice recording."""
+        try:
+            file_id = voice['file_id']
+            duration = voice.get('duration', 0)
+            filename = f"voice_recording_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.ogg"
+
+            self.telegram_client.send_message(chat_id, f'🎤 Processing voice recording ({duration}s)...')
+
+            # Download voice file
+            file_data = self.telegram_client.download_file(file_id)
+            if not file_data:
+                self.telegram_client.send_message(chat_id, '❌ Failed to download voice recording.')
+                return {'status': 'error'}
+
+            # Transcribe and analyze with Gemini (audio/ogg format)
+            analysis = self.gemini.analyze_multimodal(file_data, 'audio/ogg', filename)
+
+            # Generate structured notes
+            structured_notes = self._generate_structured_notes(analysis, filename, 'voice')
+
+            # Create validation ID
+            validation_id = f"{session_id}_{file_id}"
+
+            # Save to pending validations
+            FirestoreManager.save_pending_validation(
+                validation_id=validation_id,
+                session_id=session_id,
+                chat_id=chat_id,
+                file_type='voice',
+                filename=filename,
+                content=analysis,
+                structured_notes=structured_notes,
+                file_data=file_data
+            )
+
+            # Send preview with validation buttons
+            self._send_validation_prompt(chat_id, filename, structured_notes, validation_id)
+
+            return {'status': 'ok'}
+
+        except Exception as e:
+            logger.error(f"Error processing voice recording: {e}", exc_info=True)
+            self.telegram_client.send_message(chat_id, f'❌ Error processing voice: {str(e)}')
+            return {'status': 'error'}
+
+    def _generate_structured_notes(self, content: str, filename: str, file_type: str) -> str:
+        """Generate structured notes from file content using Gemini."""
+        try:
+            validation_prompt = get_prompt('file_validation_prompt.md')
+
+            prompt = f"{validation_prompt}\n\n"
+            prompt += f"## File Information\n"
+            prompt += f"- **Filename:** {filename}\n"
+            prompt += f"- **Type:** {file_type}\n\n"
+            prompt += f"## Content to Analyze:\n\n{content}"
+
+            # Use Gemini to generate structured notes
+            structured_notes = self.gemini.model.generate_content(prompt).text
+
+            return structured_notes
+
+        except Exception as e:
+            logger.error(f"Error generating structured notes: {e}")
+            # Fallback to basic formatting
+            return f"# {filename}\n\n## Content\n\n{content}\n\n## Tags\n#upload #{file_type}"
+
+    def _send_validation_prompt(self, chat_id: int, filename: str, structured_notes: str, validation_id: str) -> None:
+        """Send validation prompt with inline keyboard."""
+        try:
+            # Truncate notes if too long for Telegram message (4096 char limit)
+            max_length = 3500
+            preview = structured_notes[:max_length]
+            if len(structured_notes) > max_length:
+                preview += "\n\n... (truncated for preview)"
+
+            message_text = f"📋 *Preview of structured notes for:* `{filename}`\n\n"
+            message_text += "━━━━━━━━━━━━━━━━━━━━\n\n"
+            message_text += preview
+            message_text += "\n\n━━━━━━━━━━━━━━━━━━━━\n"
+            message_text += "\n*Please validate this content:*"
+
+            # Create inline keyboard
+            keyboard = [
+                [
+                    InlineKeyboardButton("✅ Validate & Save", callback_data=f"validate:{validation_id}"),
+                    InlineKeyboardButton("❌ Reject", callback_data=f"reject:{validation_id}")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            self.telegram_client.send_message(chat_id, message_text, reply_markup=reply_markup)
+
+        except Exception as e:
+            logger.error(f"Error sending validation prompt: {e}")
+            raise
+
+    def _handle_callback_query(self, callback_query: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle inline button callback queries."""
+        try:
+            query_id = callback_query['id']
+            data = callback_query['data']
+            from_user = callback_query.get('from', {})
+            user_id = from_user.get('id')
+
+            # Get chat_id from message
+            message = callback_query.get('message', {})
+            chat = message.get('chat', {})
+            chat_id = chat.get('id')
+
+            logger.info(f"Processing callback query from user {user_id}: {data}")
+
+            # Parse callback data (format: "action:validation_id")
+            parts = data.split(':', 1)
+            if len(parts) != 2:
+                logger.error(f"Invalid callback data format: {data}")
+                return {'status': 'error'}
+
+            action, validation_id = parts
+
+            # Retrieve pending validation
+            pending = FirestoreManager.get_pending_validation(validation_id)
+            if not pending:
+                self.telegram_client.answer_callback_query(query_id, "❌ Validation expired or not found")
+                self.telegram_client.send_message(chat_id, "❌ Validation not found. It may have expired.")
+                return {'status': 'error'}
+
+            if action == 'validate':
+                return self._handle_validation_approve(query_id, chat_id, pending)
+            elif action == 'reject':
+                return self._handle_validation_reject(query_id, chat_id, pending)
+            else:
+                logger.error(f"Unknown callback action: {action}")
+                return {'status': 'error'}
+
+        except Exception as e:
+            logger.error(f"Error handling callback query: {e}", exc_info=True)
+            return {'status': 'error'}
+
+    def _handle_validation_approve(self, query_id: str, chat_id: int, pending: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle validation approval - save to knowledge base."""
+        try:
+            validation_id = pending['validation_id']
+            session_id = pending['session_id']
+            filename = pending['filename']
+            structured_notes = pending['structured_notes']
+            content = pending['content']
+
+            # Answer the callback query
+            self.telegram_client.answer_callback_query(query_id, "✅ Validating and saving...")
+
+            # Send processing message
+            self.telegram_client.send_message(chat_id, f"✅ *Validation approved!*\n\nSaving `{filename}` to knowledge base...")
+
+            # Index in knowledge base
+            kb_manager = KnowledgeBaseManager()
+            file_id = f"telegram_{validation_id}"
+
+            # Generate summary for indexing (first paragraph of structured notes)
+            summary_lines = structured_notes.split('\n\n')[:2]
+            summary = '\n'.join(summary_lines)
+
+            kb_manager.index_transcript(
+                file_id=file_id,
+                filename=filename,
+                content=content,
+                summary=summary,
+                metadata={
+                    'source': 'telegram',
+                    'session_id': session_id,
+                    'structured_notes': structured_notes,
+                    'validated_at': datetime.utcnow().isoformat()
+                }
+            )
+
+            # Save to session history
+            FirestoreManager.save_message(
+                session_id,
+                'assistant',
+                f"[VALIDATED FILE: {filename}]\n\n{structured_notes}",
+                str(chat_id)
+            )
+
+            # Delete pending validation
+            FirestoreManager.delete_pending_validation(validation_id)
+
+            # Send success message
+            success_msg = f"✅ *Successfully saved!*\n\n"
+            success_msg += f"📁 File: `{filename}`\n"
+            success_msg += f"💾 Indexed in knowledge base\n"
+            success_msg += f"📝 Added to session history\n\n"
+            success_msg += f"Use /done to create a PR with this session."
+
+            self.telegram_client.send_message(chat_id, success_msg)
+
+            return {'status': 'ok'}
+
+        except Exception as e:
+            logger.error(f"Error approving validation: {e}", exc_info=True)
+            self.telegram_client.send_message(chat_id, f'❌ Error saving file: {str(e)}')
+            return {'status': 'error'}
+
+    def _handle_validation_reject(self, query_id: str, chat_id: int, pending: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle validation rejection - delete pending upload."""
+        try:
+            validation_id = pending['validation_id']
+            filename = pending['filename']
+
+            # Answer the callback query
+            self.telegram_client.answer_callback_query(query_id, "❌ Rejected")
+
+            # Delete pending validation
+            FirestoreManager.delete_pending_validation(validation_id)
+
+            # Send confirmation
+            reject_msg = f"❌ *Rejected and deleted*\n\n"
+            reject_msg += f"File `{filename}` was not saved.\n"
+            reject_msg += f"You can upload a different file if needed."
+
+            self.telegram_client.send_message(chat_id, reject_msg)
+
+            return {'status': 'ok'}
+
+        except Exception as e:
+            logger.error(f"Error rejecting validation: {e}", exc_info=True)
+            self.telegram_client.send_message(chat_id, f'❌ Error rejecting file: {str(e)}')
             return {'status': 'error'}
 
     def _handle_chat_message(self, session_id: str, chat_id: int, username: str, message_text: str) -> Dict[str, Any]:
