@@ -91,3 +91,26 @@ variable "labels" {
     environment = "production"
   }
 }
+
+variable "google_drive_folder_id" {
+  description = "Google Drive folder ID to monitor for transcripts (.txt, .m4a files)"
+  type        = string
+  default     = ""
+}
+
+variable "obsidian_drive_folder_id" {
+  description = "Google Drive folder ID for Obsidian vault (where summaries are synced)"
+  type        = string
+  default     = ""
+}
+
+variable "drive_poll_interval" {
+  description = "Seconds between Drive folder checks (only used if webhooks fail)"
+  type        = number
+  default     = 300
+
+  validation {
+    condition     = var.drive_poll_interval >= 60 && var.drive_poll_interval <= 3600
+    error_message = "Poll interval must be between 60 and 3600 seconds"
+  }
+}

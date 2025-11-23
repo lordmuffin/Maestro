@@ -31,6 +31,9 @@ GCP_PROJECT = os.environ.get('GCP_PROJECT')
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 REPO_NAME = os.environ.get('REPO_NAME')
 FUNCTION_URL = os.environ.get('FUNCTION_URL')
+GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '')
+OBSIDIAN_DRIVE_FOLDER_ID = os.environ.get('OBSIDIAN_DRIVE_FOLDER_ID', '')
+DRIVE_POLL_INTERVAL = int(os.environ.get('DRIVE_POLL_INTERVAL', '300'))
 
 # Initialize Firestore
 db = firestore.Client(project=GCP_PROJECT)
@@ -46,6 +49,23 @@ Focus on: design decisions, trade-offs, scalability, security, and real-world im
 
 MULTIMODAL_SYSTEM_PROMPT = """Analyze this raw input (audio or image) and extract all architectural concepts,
 technical details, design patterns, and implementation insights. Be thorough and structured in your analysis."""
+
+TRANSCRIPT_ANALYSIS_PROMPT = """Analyze this transcript and extract:
+1. Key architectural concepts and design patterns mentioned
+2. Technical decisions and trade-offs discussed
+3. Implementation details and code examples
+4. Pain points, challenges, or lessons learned
+5. Questions that would help dig deeper into this topic
+
+Provide a structured summary with clear sections."""
+
+INTERROGATION_PR_PROMPT = """Based on this transcript analysis, generate:
+1. A list of 5-10 probing questions to extract more details
+2. Areas that need clarification or deeper exploration
+3. Follow-up topics that should be covered
+4. Connections to related architectural concepts
+
+Format as a markdown checklist suitable for a GitHub PR."""
 
 
 class FirestoreManager:
@@ -115,6 +135,289 @@ class FirestoreManager:
         except Exception as e:
             logger.error(f"Error retrieving space name: {e}")
             return None
+
+
+class GoogleDriveClient:
+    """Handles Google Drive operations for transcript monitoring."""
+
+    def __init__(self):
+        credentials, _ = default()
+        self.service = build('drive', 'v3', credentials=credentials)
+
+    def list_files(self, folder_id: str, file_types: List[str] = None) -> List[Dict[str, Any]]:
+        """List files in a Google Drive folder."""
+        try:
+            if not folder_id:
+                logger.warning("No folder_id provided to list_files")
+                return []
+
+            # Build query
+            query = f"'{folder_id}' in parents and trashed=false"
+            if file_types:
+                mime_queries = []
+                for ft in file_types:
+                    if ft == '.txt':
+                        mime_queries.append("mimeType='text/plain'")
+                    elif ft == '.m4a':
+                        mime_queries.append("mimeType='audio/x-m4a' or mimeType='audio/mp4'")
+                if mime_queries:
+                    query += f" and ({' or '.join(mime_queries)})"
+
+            results = self.service.files().list(
+                q=query,
+                fields="files(id, name, mimeType, createdTime, modifiedTime, size)",
+                orderBy="createdTime desc",
+                pageSize=100
+            ).execute()
+
+            files = results.get('files', [])
+            logger.info(f"Found {len(files)} files in folder {folder_id}")
+            return files
+        except Exception as e:
+            logger.error(f"Error listing Drive files: {e}")
+            return []
+
+    def download_file(self, file_id: str) -> Optional[bytes]:
+        """Download file content from Google Drive."""
+        try:
+            request = self.service.files().get_media(fileId=file_id)
+            file_data = request.execute()
+            logger.info(f"Downloaded file {file_id}, size: {len(file_data)} bytes")
+            return file_data
+        except Exception as e:
+            logger.error(f"Error downloading file {file_id}: {e}")
+            return None
+
+    def get_file_metadata(self, file_id: str) -> Optional[Dict[str, Any]]:
+        """Get metadata for a file."""
+        try:
+            file_meta = self.service.files().get(
+                fileId=file_id,
+                fields="id, name, mimeType, createdTime, modifiedTime, size"
+            ).execute()
+            return file_meta
+        except Exception as e:
+            logger.error(f"Error getting file metadata: {e}")
+            return None
+
+    def upload_file(self, folder_id: str, filename: str, content: str, mime_type: str = 'text/markdown') -> Optional[str]:
+        """Upload a file to Google Drive."""
+        try:
+            from googleapiclient.http import MediaInMemoryUpload
+
+            file_metadata = {
+                'name': filename,
+                'parents': [folder_id]
+            }
+
+            media = MediaInMemoryUpload(content.encode('utf-8'), mimetype=mime_type)
+
+            file = self.service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+
+            logger.info(f"Uploaded file {filename} to folder {folder_id}, file_id: {file.get('id')}")
+            return file.get('id')
+        except Exception as e:
+            logger.error(f"Error uploading file to Drive: {e}")
+            return None
+
+
+class KnowledgeBaseManager:
+    """Manages indexed transcripts for knowledge base and RAG."""
+
+    @staticmethod
+    def index_transcript(file_id: str, filename: str, content: str, summary: str, metadata: Dict[str, Any]):
+        """Index a transcript in Firestore for search and retrieval."""
+        try:
+            kb_ref = db.collection('knowledge_base').document(file_id)
+            kb_ref.set({
+                'file_id': file_id,
+                'filename': filename,
+                'content': content,
+                'summary': summary,
+                'metadata': metadata,
+                'indexed_at': firestore.SERVER_TIMESTAMP,
+                'created_time': metadata.get('createdTime'),
+                'file_type': metadata.get('mimeType')
+            })
+            logger.info(f"Indexed transcript {filename} in knowledge base")
+        except Exception as e:
+            logger.error(f"Error indexing transcript: {e}")
+            raise
+
+    @staticmethod
+    def search_knowledge_base(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Search knowledge base for relevant transcripts."""
+        try:
+            # Simple text search - in production, use vector embeddings
+            results = []
+            kb_docs = db.collection('knowledge_base').order_by('indexed_at', direction=firestore.Query.DESCENDING).limit(20).stream()
+
+            for doc in kb_docs:
+                data = doc.to_dict()
+                # Simple keyword matching (replace with semantic search in production)
+                if query.lower() in data.get('content', '').lower() or query.lower() in data.get('summary', '').lower():
+                    results.append(data)
+                    if len(results) >= limit:
+                        break
+
+            logger.info(f"Found {len(results)} results for query: {query}")
+            return results
+        except Exception as e:
+            logger.error(f"Error searching knowledge base: {e}")
+            return []
+
+    @staticmethod
+    def get_all_transcripts(limit: int = 50) -> List[Dict[str, Any]]:
+        """Get all indexed transcripts."""
+        try:
+            docs = db.collection('knowledge_base').order_by('indexed_at', direction=firestore.Query.DESCENDING).limit(limit).stream()
+            transcripts = [doc.to_dict() for doc in docs]
+            return transcripts
+        except Exception as e:
+            logger.error(f"Error retrieving transcripts: {e}")
+            return []
+
+    @staticmethod
+    def mark_as_processed(file_id: str):
+        """Mark a file as processed to avoid duplicate processing."""
+        try:
+            processed_ref = db.collection('processed_files').document(file_id)
+            processed_ref.set({
+                'file_id': file_id,
+                'processed_at': firestore.SERVER_TIMESTAMP
+            })
+        except Exception as e:
+            logger.error(f"Error marking file as processed: {e}")
+
+    @staticmethod
+    def is_processed(file_id: str) -> bool:
+        """Check if a file has already been processed."""
+        try:
+            doc = db.collection('processed_files').document(file_id).get()
+            return doc.exists
+        except Exception as e:
+            logger.error(f"Error checking if file is processed: {e}")
+            return False
+
+
+class ObsidianSync:
+    """Syncs summaries to Obsidian vault in Google Drive."""
+
+    def __init__(self, drive_client: GoogleDriveClient):
+        self.drive_client = drive_client
+
+    def create_markdown_note(self, title: str, content: str, summary: str, tags: List[str], metadata: Dict[str, Any]) -> str:
+        """Create a markdown note formatted for Obsidian."""
+        # Create frontmatter
+        frontmatter = "---\n"
+        frontmatter += f"title: {title}\n"
+        frontmatter += f"created: {metadata.get('createdTime', datetime.utcnow().isoformat())}\n"
+        frontmatter += f"source: Google Drive\n"
+        frontmatter += f"file_id: {metadata.get('file_id', '')}\n"
+        if tags:
+            frontmatter += f"tags: [{', '.join(tags)}]\n"
+        frontmatter += "---\n\n"
+
+        # Build note content
+        note = frontmatter
+        note += f"# {title}\n\n"
+        note += f"## Summary\n\n{summary}\n\n"
+        note += f"## Full Content\n\n{content}\n\n"
+        note += f"## Metadata\n\n"
+        note += f"- **File Type**: {metadata.get('mimeType', 'Unknown')}\n"
+        note += f"- **Created**: {metadata.get('createdTime', 'Unknown')}\n"
+        note += f"- **Size**: {metadata.get('size', 'Unknown')} bytes\n"
+
+        return note
+
+    def sync_to_obsidian(self, filename: str, content: str, summary: str, tags: List[str], metadata: Dict[str, Any]) -> Optional[str]:
+        """Upload markdown note to Obsidian Drive folder."""
+        try:
+            if not OBSIDIAN_DRIVE_FOLDER_ID:
+                logger.warning("OBSIDIAN_DRIVE_FOLDER_ID not configured, skipping sync")
+                return None
+
+            # Create markdown filename
+            base_name = filename.rsplit('.', 1)[0]  # Remove extension
+            md_filename = f"{base_name}.md"
+
+            # Create markdown content
+            md_content = self.create_markdown_note(
+                title=base_name,
+                content=content,
+                summary=summary,
+                tags=tags,
+                metadata=metadata
+            )
+
+            # Upload to Obsidian folder
+            file_id = self.drive_client.upload_file(
+                folder_id=OBSIDIAN_DRIVE_FOLDER_ID,
+                filename=md_filename,
+                content=md_content,
+                mime_type='text/markdown'
+            )
+
+            logger.info(f"Synced {md_filename} to Obsidian vault")
+            return file_id
+        except Exception as e:
+            logger.error(f"Error syncing to Obsidian: {e}")
+            return None
+
+
+class TranscriptProcessor:
+    """Processes transcript files (.txt and .m4a)."""
+
+    def __init__(self, gemini_client):
+        self.gemini = gemini_client
+
+    def process_text_transcript(self, text_content: str) -> str:
+        """Process a text transcript."""
+        return text_content
+
+    def process_audio_transcript(self, audio_data: bytes, filename: str) -> str:
+        """Process an audio file (.m4a) using Gemini."""
+        try:
+            # Use Gemini's multimodal capabilities to transcribe audio
+            logger.info(f"Transcribing audio file: {filename}")
+
+            # Create audio part for Gemini
+            part = Part.from_data(data=audio_data, mime_type='audio/mp4')
+            prompt_part = Part.from_text("Transcribe this audio recording. Provide a clean, accurate transcription of all spoken content.")
+
+            # Generate transcription
+            response = self.gemini.model.generate_content([prompt_part, part])
+            transcription = response.text
+
+            logger.info(f"Successfully transcribed audio file: {filename}")
+            return transcription
+        except Exception as e:
+            logger.error(f"Error transcribing audio: {e}")
+            return f"[Transcription failed: {str(e)}]"
+
+    def analyze_transcript(self, transcript_text: str) -> str:
+        """Analyze transcript using Gemini to extract insights."""
+        try:
+            prompt = f"{TRANSCRIPT_ANALYSIS_PROMPT}\n\nTranscript:\n{transcript_text}"
+            response = self.gemini.model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            logger.error(f"Error analyzing transcript: {e}")
+            return f"Analysis failed: {str(e)}"
+
+    def generate_interrogation_questions(self, analysis: str) -> str:
+        """Generate interrogation questions based on analysis."""
+        try:
+            prompt = f"{INTERROGATION_PR_PROMPT}\n\nAnalysis:\n{analysis}"
+            response = self.gemini.model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            logger.error(f"Error generating questions: {e}")
+            return f"Question generation failed: {str(e)}"
 
 
 class GeminiClient:
@@ -237,11 +540,110 @@ class GitHubManager:
             logger.error(f"Error creating PR: {e}")
             raise
 
+    def create_pr_from_transcript(self, filename: str, transcript: str, analysis: str, questions: str, metadata: Dict[str, Any]) -> str:
+        """Create a PR with transcript analysis and interrogation questions."""
+        try:
+            # Generate branch name from filename and timestamp
+            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            safe_filename = filename.replace('.', '-').replace(' ', '-')
+            branch_name = f"transcript/{safe_filename}-{timestamp}"
+
+            # Get default branch
+            default_branch = self.repo.default_branch
+            source = self.repo.get_branch(default_branch)
+
+            # Create new branch
+            self.repo.create_git_ref(
+                ref=f"refs/heads/{branch_name}",
+                sha=source.commit.sha
+            )
+            logger.info(f"Created branch: {branch_name}")
+
+            # Format as markdown
+            markdown_content = self._format_transcript_as_markdown(filename, transcript, analysis, questions, metadata)
+
+            # Create filename for transcripts directory
+            date_str = datetime.now().strftime('%Y-%m-%d')
+            base_name = filename.rsplit('.', 1)[0]
+            file_path = f"transcripts/{date_str}-{base_name}.md"
+
+            # Commit file
+            self.repo.create_file(
+                path=file_path,
+                message=f"Add transcript analysis: {filename}",
+                content=markdown_content,
+                branch=branch_name
+            )
+            logger.info(f"Committed file: {file_path}")
+
+            # Create PR with interrogation questions
+            pr_body = f"""## 📝 New Transcript Processed
+
+**File**: `{filename}`
+**Source**: Google Drive
+**Processed**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC
+
+### 🔍 Analysis Summary
+
+{analysis[:500]}...
+
+### ❓ Interrogation Questions
+
+{questions}
+
+---
+
+**Instructions**: Please review the full transcript in the attached file and answer the questions above. Your responses will be added to the knowledge base.
+
+🤖 Generated by V2V2B Interrogator
+"""
+
+            pr = self.repo.create_pull(
+                title=f"📋 Transcript Analysis: {filename}",
+                body=pr_body,
+                head=branch_name,
+                base=default_branch
+            )
+            logger.info(f"Created PR: {pr.html_url}")
+
+            return pr.html_url
+        except Exception as e:
+            logger.error(f"Error creating transcript PR: {e}")
+            raise
+
+    def _format_transcript_as_markdown(self, filename: str, transcript: str, analysis: str, questions: str, metadata: Dict[str, Any]) -> str:
+        """Format transcript analysis as markdown."""
+        lines = [
+            f"# Transcript Analysis: {filename}",
+            f"\n**Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+            f"**File ID**: {metadata.get('file_id', 'N/A')}",
+            f"**Source**: Google Drive",
+            "\n---\n",
+            "\n## 📊 Analysis\n",
+            analysis,
+            "\n\n---\n",
+            "\n## ❓ Interrogation Questions\n",
+            questions,
+            "\n\n---\n",
+            "\n## 📄 Full Transcript\n",
+            "```",
+            transcript,
+            "```",
+            "\n\n---\n",
+            "\n## 📋 Metadata\n",
+            f"- **File Type**: {metadata.get('mimeType', 'Unknown')}",
+            f"- **Created**: {metadata.get('createdTime', 'Unknown')}",
+            f"- **Size**: {metadata.get('size', 'Unknown')} bytes",
+            f"- **Drive File ID**: {metadata.get('file_id', 'N/A')}"
+        ]
+
+        return "\n".join(lines)
+
     def _format_history_as_markdown(self, session_id: str, history: List[Dict[str, str]]) -> str:
         """Format session history as markdown."""
         lines = [
             f"# Session: {session_id}",
-            f"\n**Date**: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+            f"\n**Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC",
             "\n---\n"
         ]
 
@@ -497,6 +899,131 @@ class UploadHandler:
         </body>
         </html>
         """
+
+
+class DriveMonitorHandler:
+    """Handles processing of new transcript files from Google Drive."""
+
+    def __init__(self):
+        self.drive_client = GoogleDriveClient()
+        self.gemini = GeminiClient()
+        self.transcript_processor = TranscriptProcessor(self.gemini)
+        self.github_manager = GitHubManager()
+        self.obsidian_sync = ObsidianSync(self.drive_client)
+
+    def scan_and_process_new_files(self) -> Dict[str, Any]:
+        """Scan Drive folder for new files and process them."""
+        try:
+            if not GOOGLE_DRIVE_FOLDER_ID:
+                return {'error': 'GOOGLE_DRIVE_FOLDER_ID not configured', 'processed': 0}
+
+            logger.info(f"Scanning Google Drive folder: {GOOGLE_DRIVE_FOLDER_ID}")
+
+            # List files in folder
+            files = self.drive_client.list_files(
+                folder_id=GOOGLE_DRIVE_FOLDER_ID,
+                file_types=['.txt', '.m4a']
+            )
+
+            processed_count = 0
+            results = []
+
+            for file in files:
+                file_id = file['id']
+                filename = file['name']
+
+                # Skip if already processed
+                if KnowledgeBaseManager.is_processed(file_id):
+                    logger.info(f"Skipping already processed file: {filename}")
+                    continue
+
+                # Process the file
+                result = self.process_file(file)
+                if result.get('success'):
+                    processed_count += 1
+                    results.append(result)
+
+            logger.info(f"Processed {processed_count} new files")
+
+            return {
+                'success': True,
+                'processed': processed_count,
+                'results': results
+            }
+        except Exception as e:
+            logger.error(f"Error scanning Drive folder: {e}")
+            return {'error': str(e), 'processed': 0}
+
+    def process_file(self, file_metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a single file from Google Drive."""
+        try:
+            file_id = file_metadata['id']
+            filename = file_metadata['name']
+            mime_type = file_metadata.get('mimeType', '')
+
+            logger.info(f"Processing file: {filename} (ID: {file_id})")
+
+            # Download file
+            file_data = self.drive_client.download_file(file_id)
+            if not file_data:
+                return {'success': False, 'filename': filename, 'error': 'Download failed'}
+
+            # Process based on file type
+            if mime_type == 'text/plain' or filename.endswith('.txt'):
+                transcript = self.transcript_processor.process_text_transcript(file_data.decode('utf-8'))
+            elif 'audio' in mime_type or filename.endswith('.m4a'):
+                transcript = self.transcript_processor.process_audio_transcript(file_data, filename)
+            else:
+                return {'success': False, 'filename': filename, 'error': f'Unsupported file type: {mime_type}'}
+
+            # Analyze transcript
+            analysis = self.transcript_processor.analyze_transcript(transcript)
+
+            # Generate interrogation questions
+            questions = self.transcript_processor.generate_interrogation_questions(analysis)
+
+            # Index in knowledge base
+            KnowledgeBaseManager.index_transcript(
+                file_id=file_id,
+                filename=filename,
+                content=transcript,
+                summary=analysis,
+                metadata=file_metadata
+            )
+
+            # Sync to Obsidian
+            obsidian_file_id = self.obsidian_sync.sync_to_obsidian(
+                filename=filename,
+                content=transcript,
+                summary=analysis,
+                tags=['transcript', 'auto-processed'],
+                metadata={**file_metadata, 'file_id': file_id}
+            )
+
+            # Create GitHub PR
+            pr_url = self.github_manager.create_pr_from_transcript(
+                filename=filename,
+                transcript=transcript,
+                analysis=analysis,
+                questions=questions,
+                metadata={**file_metadata, 'file_id': file_id}
+            )
+
+            # Mark as processed
+            KnowledgeBaseManager.mark_as_processed(file_id)
+
+            logger.info(f"Successfully processed {filename}: PR={pr_url}, Obsidian={obsidian_file_id}")
+
+            return {
+                'success': True,
+                'filename': filename,
+                'file_id': file_id,
+                'pr_url': pr_url,
+                'obsidian_file_id': obsidian_file_id
+            }
+        except Exception as e:
+            logger.error(f"Error processing file {file_metadata.get('name')}: {e}")
+            return {'success': False, 'filename': file_metadata.get('name'), 'error': str(e)}
 
 
 def get_upload_ui_html(session_id: str) -> str:
@@ -796,17 +1323,42 @@ def entry_point(request):
             response.headers['Content-Type'] = 'text/html'
             return response
 
-        # Route D: Health Check (GET /)
+        # Route D: Manual Drive Scan (GET /?mode=scan)
+        elif request.method == 'GET' and mode == 'scan':
+            handler = DriveMonitorHandler()
+            result = handler.scan_and_process_new_files()
+            return jsonify(result), 200
+
+        # Route E: Drive Webhook Handler (POST /?mode=drive_webhook)
+        elif request.method == 'POST' and mode == 'drive_webhook':
+            # Google Drive push notification webhook
+            # This will be called when new files are added to the watched folder
+            handler = DriveMonitorHandler()
+            result = handler.scan_and_process_new_files()
+            return jsonify(result), 200
+
+        # Route F: Health Check (GET /)
         elif request.method == 'GET' and not mode:
             return jsonify({
                 'status': 'healthy',
                 'service': 'V2V2B Interrogator',
-                'version': '1.0.0',
+                'version': '2.0.0',
                 'endpoints': {
                     'chat_webhook': 'POST /',
                     'upload_ui': 'GET /?mode=ui&session=SESSION_ID',
-                    'file_upload': 'POST /?mode=upload&session=SESSION_ID'
-                }
+                    'file_upload': 'POST /?mode=upload&session=SESSION_ID',
+                    'drive_scan': 'GET /?mode=scan',
+                    'drive_webhook': 'POST /?mode=drive_webhook'
+                },
+                'features': [
+                    'Google Chat bot',
+                    'Multimodal file analysis',
+                    'Google Drive monitoring',
+                    'Transcript processing (.txt, .m4a)',
+                    'Knowledge base indexing',
+                    'Obsidian vault sync',
+                    'Automated PR creation'
+                ]
             }), 200
 
         else:

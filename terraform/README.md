@@ -1,12 +1,25 @@
 # V2V2B Interrogator - Terraform Deployment
 
-Infrastructure-as-Code deployment for the V2V2B Interrogator Google Chat bot.
+Infrastructure-as-Code deployment for the V2V2B Interrogator: An AI-powered system that auto-processes transcripts from Google Drive, creates interrogation PRs, builds a knowledge base, and syncs to Obsidian.
+
+## ✨ Features
+
+- 🤖 **Google Chat Bot** - Sarcastic Enterprise Architect conducting technical interviews
+- 📂 **Google Drive Monitor** - Auto-detects new transcript files (.txt, .m4a)
+- 🎙️ **Audio Transcription** - Converts .m4a files to text using Gemini AI
+- 🧠 **AI Analysis** - Extracts insights, patterns, and technical concepts
+- ❓ **Interrogation PRs** - Creates GitHub PRs with probing questions
+- 📚 **Knowledge Base** - Indexes all content in Firestore for RAG
+- 📝 **Obsidian Sync** - Auto-syncs summaries to your Obsidian vault
+- 🔍 **Multimodal** - Processes text, audio, and images
 
 ## 📁 Directory Structure
 
 ```
 terraform/
 ├── main.tf                      # Main Terraform configuration
+├── main.py                      # Cloud Function source code
+├── requirements.txt             # Python dependencies
 ├── variables.tf                 # Variable definitions
 ├── outputs.tf                   # Output values
 ├── backend.tf                   # State backend configuration
@@ -16,6 +29,8 @@ terraform/
 ```
 
 ## 🚀 Quick Start
+
+> **📌 GitHub Actions Deployment**: For CI/CD deployment via GitHub Actions, see [GitHub Configuration Guide](../.github/CONFIGURATION.md) for setting up secrets and environment variables.
 
 ### 1. Prerequisites
 
@@ -57,6 +72,11 @@ Required variables:
 - `github_token` - GitHub Personal Access Token
 - `repo_name` - GitHub repository (username/repo)
 
+Optional Google Drive variables:
+- `google_drive_folder_id` - Drive folder ID to monitor for transcripts
+- `obsidian_drive_folder_id` - Drive folder ID for Obsidian vault
+- `drive_poll_interval` - Polling interval in seconds (default: 300)
+
 ### 4. Initialize Terraform
 
 ```bash
@@ -94,6 +114,138 @@ echo 'function_url = "$(terraform output -raw function_url)"' >> terraform.tfvar
 # Apply again to update the environment variable
 terraform apply
 ```
+
+## 📂 Google Drive Setup (Optional)
+
+### Enable Automatic Transcript Processing
+
+#### 1. Get Google Drive Folder IDs
+
+```bash
+# Option 1: From the URL
+# https://drive.google.com/drive/folders/FOLDER_ID_HERE
+# Copy the FOLDER_ID_HERE part
+
+# Option 2: Using gcloud
+gcloud alpha storage ls --folders
+```
+
+#### 2. Configure Drive Access
+
+The Cloud Function's service account needs access to your Drive folders:
+
+```bash
+# Get the service account email
+terraform output service_account_email
+
+# Share your Drive folders with this service account:
+# 1. Open Google Drive
+# 2. Right-click the folder → Share
+# 3. Add the service account email with "Viewer" access (for transcript folder)
+# 4. Add with "Editor" access (for Obsidian folder - to write summaries)
+```
+
+#### 3. Add to terraform.tfvars
+
+```hcl
+google_drive_folder_id   = "YOUR_TRANSCRIPT_FOLDER_ID"
+obsidian_drive_folder_id = "YOUR_OBSIDIAN_FOLDER_ID"
+```
+
+#### 4. Redeploy
+
+```bash
+terraform apply
+```
+
+### Test Drive Integration
+
+```bash
+# Get your function URL
+FUNCTION_URL=$(terraform output -raw function_url)
+
+# Manually trigger a scan
+curl "$FUNCTION_URL?mode=scan"
+
+# Check the response
+# Should show: {"success": true, "processed": N, "results": [...]}
+```
+
+### Workflow
+
+1. **Upload** a `.txt` or `.m4a` file to your Drive folder
+2. **Trigger** scan manually (`GET /?mode=scan`) or wait for webhook
+3. **Processing**:
+   - File downloaded from Drive
+   - Audio transcribed (if .m4a)
+   - AI analyzes content
+   - Questions generated
+4. **Outputs**:
+   - ✅ GitHub PR created with interrogation questions
+   - ✅ Summary synced to Obsidian vault
+   - ✅ Content indexed in knowledge base
+
+## 🌐 API Endpoints
+
+Once deployed, your Cloud Function exposes these endpoints:
+
+### Health Check
+```bash
+GET /
+```
+Returns service status and available endpoints.
+
+### Google Chat Webhook
+```bash
+POST /
+Content-Type: application/json
+```
+Receives Google Chat events for interactive conversations.
+
+### Upload UI
+```bash
+GET /?mode=ui&session=SESSION_ID
+```
+Web interface for uploading audio/image files for analysis.
+
+### File Upload
+```bash
+POST /?mode=upload&session=SESSION_ID
+Content-Type: multipart/form-data
+```
+Processes uploaded files and analyzes with Gemini AI.
+
+### Drive Scan (Manual Trigger)
+```bash
+GET /?mode=scan
+```
+Manually trigger scanning of Google Drive folder for new transcripts.
+
+**Example:**
+```bash
+curl "https://v2v2b-interrogator-xxx.a.run.app/?mode=scan"
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "processed": 2,
+  "results": [
+    {
+      "filename": "meeting-notes.txt",
+      "pr_url": "https://github.com/user/repo/pull/123",
+      "obsidian_file_id": "1abc..."
+    }
+  ]
+}
+```
+
+### Drive Webhook
+```bash
+POST /?mode=drive_webhook
+```
+Receives Google Drive push notifications (setup required).
 
 ## 📊 Terraform Commands
 
@@ -284,6 +436,61 @@ terraform import google_cloudfunctions2_function.v2v2b_interrogator \
 
 The configuration handles this automatically with `ignore_changes` lifecycle rule.
 
+## 🗄️ Firestore Collections
+
+The system uses these Firestore collections:
+
+### `sessions`
+Stores Google Chat conversation history.
+
+**Document Structure:**
+```javascript
+{
+  session_id: "user@example.com_2025-01-22",
+  space_name: "spaces/ABC123",
+  history: [
+    {
+      role: "user",
+      content: "Tell me about...",
+      timestamp: "2025-01-22T10:00:00Z"
+    }
+  ],
+  created_at: Timestamp,
+  last_updated: Timestamp
+}
+```
+
+### `knowledge_base`
+Indexed transcripts for RAG and search.
+
+**Document Structure:**
+```javascript
+{
+  file_id: "1abc123...",
+  filename: "meeting-notes.txt",
+  content: "Full transcript text...",
+  summary: "AI-generated summary...",
+  metadata: {
+    mimeType: "text/plain",
+    createdTime: "2025-01-22T...",
+    size: 12345
+  },
+  indexed_at: Timestamp,
+  file_type: "text/plain"
+}
+```
+
+### `processed_files`
+Tracks which files have been processed to prevent duplicates.
+
+**Document Structure:**
+```javascript
+{
+  file_id: "1abc123...",
+  processed_at: Timestamp
+}
+```
+
 ## 🔐 Security Best Practices
 
 ### 1. Use Secret Manager (Recommended)
@@ -345,36 +552,48 @@ gcloud beta billing accounts list
 
 ## 🔄 CI/CD Integration
 
-### GitHub Actions
+### GitHub Actions (Recommended)
 
-```yaml
-name: Terraform Deploy
-on:
-  push:
-    branches: [main]
+This repository includes a complete GitHub Actions workflow for automated Terraform deployment.
 
-jobs:
-  terraform:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: hashicorp/setup-terraform@v2
-      - name: Terraform Init
-        run: terraform init
-        working-directory: ./terraform
-      - name: Terraform Apply
-        run: terraform apply -auto-approve
-        working-directory: ./terraform
-        env:
-          GOOGLE_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          TF_VAR_github_token: ${{ secrets.GITHUB_TOKEN }}
-```
+**Setup Guide**: See [../.github/CONFIGURATION.md](../.github/CONFIGURATION.md) for detailed instructions.
+
+**Quick Setup**:
+1. Configure GitHub Secrets:
+   - `GCP_PROJECT_ID` - Your GCP project ID
+   - `GH_TOKEN` - GitHub Personal Access Token
+   - `GCP_WORKLOAD_IDENTITY_PROVIDER` - Workload Identity provider
+   - `GCP_SERVICE_ACCOUNT` - Service account email
+   - (Optional) `GOOGLE_DRIVE_FOLDER_ID`, `OBSIDIAN_DRIVE_FOLDER_ID`
+
+2. Push to main branch or use workflow dispatch:
+   ```bash
+   git push origin main
+   ```
+
+3. The workflow will:
+   - ✅ Validate configuration
+   - ✅ Import existing resources
+   - ✅ Run Terraform plan
+   - ✅ Apply changes (on main branch)
+   - ✅ Output function URL
+
+**Workflow Features**:
+- Automatic resource import (prevents 409 errors)
+- Centralized configuration via GitHub secrets
+- PR plan comments
+- Security scanning (tfsec, Checkov)
+- Workload Identity Federation (no keys needed)
 
 ### GitLab CI
 
 ```yaml
 terraform:
   image: hashicorp/terraform:latest
+  variables:
+    TF_VAR_gcp_project: $GCP_PROJECT_ID
+    TF_VAR_github_token: $GITHUB_TOKEN
+    TF_VAR_repo_name: $CI_PROJECT_PATH
   script:
     - cd terraform
     - terraform init
@@ -383,10 +602,87 @@ terraform:
     - main
 ```
 
+## 🐛 Google Drive Troubleshooting
+
+### Drive API Permission Denied
+
+```bash
+# Verify Drive API is enabled
+gcloud services list --enabled | grep drive
+
+# Enable if needed
+gcloud services enable drive.googleapis.com
+
+# Check service account has Drive access
+gcloud projects get-iam-policy PROJECT_ID \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:serviceAccount:SA_EMAIL"
+```
+
+### Files Not Being Processed
+
+1. **Check folder ID is correct**:
+   ```bash
+   # Test with Drive API
+   curl -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+     "https://www.googleapis.com/drive/v3/files/FOLDER_ID"
+   ```
+
+2. **Verify service account has access**:
+   - Open Drive folder in browser
+   - Check if service account email is in "Shared with" list
+   - Should have at least "Viewer" access
+
+3. **Check function logs**:
+   ```bash
+   gcloud functions logs read v2v2b-interrogator \
+     --gen2 \
+     --region=us-central1 \
+     --limit=50
+   ```
+
+4. **Test scan endpoint**:
+   ```bash
+   FUNCTION_URL=$(terraform output -raw function_url)
+   curl -v "$FUNCTION_URL?mode=scan"
+   ```
+
+### Obsidian Sync Not Working
+
+1. **Verify Obsidian folder ID**:
+   ```bash
+   # Should be different from transcript folder
+   echo $OBSIDIAN_DRIVE_FOLDER_ID
+   ```
+
+2. **Check service account has write access**:
+   - Service account needs "Editor" role on Obsidian folder
+   - Check folder sharing settings
+
+3. **View created files**:
+   ```bash
+   # List files in Obsidian folder
+   gcloud alpha storage ls gs://BUCKET/obsidian/
+   ```
+
+### Duplicate Processing
+
+Files are tracked in `processed_files` collection. To reset:
+
+```python
+# Using Firebase Console or Python
+from google.cloud import firestore
+db = firestore.Client()
+db.collection('processed_files').document('FILE_ID').delete()
+```
+
 ## 📚 Additional Resources
 
 - [Terraform GCP Provider](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
 - [Cloud Functions Documentation](https://cloud.google.com/functions/docs)
+- [Google Drive API](https://developers.google.com/drive/api/guides/about-sdk)
+- [Gemini AI Documentation](https://ai.google.dev/docs)
+- [Firestore Documentation](https://cloud.google.com/firestore/docs)
 - [Terraform Best Practices](https://www.terraform.io/docs/cloud/guides/recommended-practices/index.html)
 
 ## 🆘 Support

@@ -29,6 +29,14 @@ env:
   TERRAFORM_VERSION: '1.6.0'
   WORKING_DIR: './terraform'
   TERRAFORM_STATE_BUCKET: ${{ vars.TERRAFORM_STATE_BUCKET }}
+  # Terraform variables - centralized configuration
+  TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
+  TF_VAR_github_token: ${{ secrets.GH_TOKEN }}
+  TF_VAR_repo_name: ${{ vars.REPO_NAME || 'lordmuffin/Maestro' }}
+  TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
+  TF_VAR_obsidian_drive_folder_id: ${{ secrets.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
+  TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
+  TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
 
 permissions:
   contents: read
@@ -93,96 +101,57 @@ jobs:
         run: |
           # Import existing resources if they exist
           # This allows Terraform to manage resources that were created outside of Terraform
+          # Using environment variables from TF_VAR_* (automatically picked up by Terraform)
 
-          PROJECT_ID="${{ secrets.GCP_PROJECT_ID || 'gen-lang-client-0805519538' }}"
+          PROJECT_ID="${{ env.TF_VAR_gcp_project }}"
           FUNCTION_NAME="v2v2b-interrogator"
 
+          echo "Importing existing resources for project: $PROJECT_ID"
+
           # Import Firestore database
-          terraform import -var="gcp_project=$PROJECT_ID" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
-            google_firestore_database.database "projects/$PROJECT_ID/databases/(default)" 2>/dev/null || true
+          terraform import google_firestore_database.database "projects/$PROJECT_ID/databases/(default)" 2>/dev/null || true
 
           # Import Storage bucket
-          terraform import -var="gcp_project=$PROJECT_ID" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
-            google_storage_bucket.function_bucket "$PROJECT_ID-v2v2b-function-source" 2>/dev/null || true
+          terraform import google_storage_bucket.function_bucket "$PROJECT_ID-v2v2b-function-source" 2>/dev/null || true
 
           # Import Service account
-          terraform import -var="gcp_project=$PROJECT_ID" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
-            google_service_account.function_sa "projects/$PROJECT_ID/serviceAccounts/$FUNCTION_NAME-sa@$PROJECT_ID.iam.gserviceaccount.com" 2>/dev/null || true
+          terraform import google_service_account.function_sa "projects/$PROJECT_ID/serviceAccounts/$FUNCTION_NAME-sa@$PROJECT_ID.iam.gserviceaccount.com" 2>/dev/null || true
 
           # Import API services
-          terraform import -var="gcp_project=$PROJECT_ID" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
-            google_project_service.cloud_functions "$PROJECT_ID/cloudfunctions.googleapis.com" 2>/dev/null || true
-
-          terraform import -var="gcp_project=$PROJECT_ID" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
-            google_project_service.cloud_build "$PROJECT_ID/cloudbuild.googleapis.com" 2>/dev/null || true
-
-          terraform import -var="gcp_project=$PROJECT_ID" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
-            google_project_service.firestore "$PROJECT_ID/firestore.googleapis.com" 2>/dev/null || true
-
-          terraform import -var="gcp_project=$PROJECT_ID" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
-            google_project_service.aiplatform "$PROJECT_ID/aiplatform.googleapis.com" 2>/dev/null || true
-
-          terraform import -var="gcp_project=$PROJECT_ID" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
-            google_project_service.chat "$PROJECT_ID/chat.googleapis.com" 2>/dev/null || true
-
-          terraform import -var="gcp_project=$PROJECT_ID" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
-            google_project_service.cloud_run "$PROJECT_ID/run.googleapis.com" 2>/dev/null || true
+          terraform import google_project_service.cloud_functions "$PROJECT_ID/cloudfunctions.googleapis.com" 2>/dev/null || true
+          terraform import google_project_service.cloud_build "$PROJECT_ID/cloudbuild.googleapis.com" 2>/dev/null || true
+          terraform import google_project_service.firestore "$PROJECT_ID/firestore.googleapis.com" 2>/dev/null || true
+          terraform import google_project_service.aiplatform "$PROJECT_ID/aiplatform.googleapis.com" 2>/dev/null || true
+          terraform import google_project_service.chat "$PROJECT_ID/chat.googleapis.com" 2>/dev/null || true
+          terraform import google_project_service.cloud_run "$PROJECT_ID/run.googleapis.com" 2>/dev/null || true
+          terraform import google_project_service.drive "$PROJECT_ID/drive.googleapis.com" 2>/dev/null || true
 
           # Import Firestore rules release (if it exists)
-          terraform import -var="gcp_project=$PROJECT_ID" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}" \
-            'google_firebaserules_release.firestore[0]' "projects/$PROJECT_ID/releases/cloud.firestore" 2>/dev/null || true
+          terraform import 'google_firebaserules_release.firestore[0]' "projects/$PROJECT_ID/releases/cloud.firestore" 2>/dev/null || true
 
           echo "Import step completed (errors are expected if resources don't exist or are already imported)"
 
-      # Temporarily disabled for testing
-      # - name: Validate Required Secrets
-      #   run: |
-      #     if [ -z "${{ secrets.GCP_PROJECT_ID }}" ]; then
-      #       echo "::error::GCP_PROJECT_ID secret is not set. Please configure it in Settings -> Environments -> project-maestro-gcp"
-      #       exit 1
-      #     fi
-      #     if [ -z "${{ secrets.GH_TOKEN }}" ]; then
-      #       echo "::error::GH_TOKEN secret is not set. Please configure it in Settings -> Environments -> project-maestro-gcp"
-      #       exit 1
-      #     fi
-      #     if [ -z "${{ secrets.REPO_NAME }}" ]; then
-      #       echo "::error::REPO_NAME secret is not set. Please configure it in Settings -> Environments -> project-maestro-gcp"
-      #       exit 1
-      #     fi
-      #     echo "All required secrets are configured"
+      - name: Validate Required Configuration
+        run: |
+          if [ -z "${{ env.TF_VAR_gcp_project }}" ]; then
+            echo "::error::GCP_PROJECT_ID secret is not set. Please configure it in Settings -> Secrets -> GCP_PROJECT_ID"
+            exit 1
+          fi
+          if [ -z "${{ env.TF_VAR_github_token }}" ]; then
+            echo "::error::GH_TOKEN secret is not set. Please configure it in Settings -> Secrets -> GH_TOKEN"
+            exit 1
+          fi
+          echo "✅ All required configuration is set"
+          echo "Project: ${{ env.TF_VAR_gcp_project }}"
+          echo "Repo: ${{ env.TF_VAR_repo_name }}"
+          echo "Drive Folder ID: ${{ env.TF_VAR_google_drive_folder_id != '' && 'configured' || 'not set (optional)' }}"
+          echo "Obsidian Folder ID: ${{ env.TF_VAR_obsidian_drive_folder_id != '' && 'configured' || 'not set (optional)' }}"
+          echo "Drive Poll Interval: ${{ env.TF_VAR_drive_poll_interval }} seconds"
 
       - name: Terraform Plan
         id: plan
-        run: |
-          terraform plan -no-color -input=false -out=tfplan \
-            -var="gcp_project=${{ secrets.GCP_PROJECT_ID || 'gen-lang-client-0805519538' }}" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}"
+        run: terraform plan -no-color -input=false -out=tfplan
         continue-on-error: true
-        env:
-          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID || 'gen-lang-client-0805519538' }}
-          TF_VAR_github_token: ${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}
-          TF_VAR_repo_name: ${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}
 
       - name: Comment PR with Plan
         uses: actions/github-script@v7
@@ -235,15 +204,7 @@ jobs:
 
       - name: Terraform Destroy
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
-        run: |
-          terraform destroy -auto-approve \
-            -var="gcp_project=${{ secrets.GCP_PROJECT_ID || 'gen-lang-client-0805519538' }}" \
-            -var="github_token=${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}" \
-            -var="repo_name=${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}"
-        env:
-          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID || 'gen-lang-client-0805519538' }}
-          TF_VAR_github_token: ${{ secrets.GH_TOKEN || 'dummy-token-for-testing' }}
-          TF_VAR_repo_name: ${{ secrets.REPO_NAME || 'lordmuffin/Maestro' }}
+        run: terraform destroy -auto-approve
 
       - name: Get Terraform Outputs
         if: |

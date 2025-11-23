@@ -76,6 +76,11 @@ resource "google_project_service" "cloud_run" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "drive" {
+  service            = "drive.googleapis.com"
+  disable_on_destroy = false
+}
+
 # Create Firestore Database (only if it doesn't exist)
 resource "google_firestore_database" "database" {
   project     = var.gcp_project
@@ -151,9 +156,12 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
     timeout_seconds    = var.timeout_seconds
 
     environment_variables = {
-      GCP_PROJECT  = var.gcp_project
-      GITHUB_TOKEN = var.github_token
-      REPO_NAME    = var.repo_name
+      GCP_PROJECT              = var.gcp_project
+      GITHUB_TOKEN             = var.github_token
+      REPO_NAME                = var.repo_name
+      GOOGLE_DRIVE_FOLDER_ID   = var.google_drive_folder_id
+      OBSIDIAN_DRIVE_FOLDER_ID = var.obsidian_drive_folder_id
+      DRIVE_POLL_INTERVAL      = tostring(var.drive_poll_interval)
       # Note: FUNCTION_URL is set via output after first deployment
       FUNCTION_URL = var.function_url != "" ? var.function_url : "https://${var.region}-${var.gcp_project}.cloudfunctions.net/${var.function_name}"
     }
@@ -197,6 +205,13 @@ resource "google_project_iam_member" "aiplatform_user" {
 resource "google_project_iam_member" "logging_writer" {
   project = var.gcp_project
   role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.function_sa.email}"
+}
+
+# Grant Google Drive access for reading transcripts and writing to Obsidian folder
+resource "google_project_iam_member" "drive_user" {
+  project = var.gcp_project
+  role    = "roles/drive.file"
   member  = "serviceAccount:${google_service_account.function_sa.email}"
 }
 

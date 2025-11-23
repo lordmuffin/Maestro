@@ -1,19 +1,48 @@
+# V2V2B Interrogator - Terraform Variables
+# Copy this file to terraform.tfvars and update with your values
+
+# ========================================
+# Required Variables
+# ========================================
+
 # GCP Project Configuration
 gcp_project = "your-project-id"
 region      = "us-central1"
 
-# Function Configuration
-function_name = "v2v2b-interrogator"
-
-# GitHub Integration
-github_token = "ghp_your_github_personal_access_token_here"
+# GitHub Integration (Required)
+github_token = "ghp_your_github_personal_access_token_here"  # Get from: https://github.com/settings/tokens
 repo_name    = "your-username/your-repository"
 
-# Function URL (leave empty for first deployment, update after)
+# ========================================
+# Google Drive Integration (Optional)
+# ========================================
+
+# Google Drive folder ID to monitor for transcripts (.txt, .m4a files)
+# Get from URL: https://drive.google.com/drive/folders/FOLDER_ID
+google_drive_folder_id = ""  # e.g., "1abc123def456ghi789"
+
+# Google Drive folder ID for Obsidian vault (where summaries are synced)
+obsidian_drive_folder_id = ""  # e.g., "1xyz987uvw654rst321"
+
+# Polling interval in seconds (default: 300 = 5 minutes)
+drive_poll_interval = 300
+
+# ========================================
+# Function Configuration
+# ========================================
+
+function_name = "v2v2b-interrogator"
+
+# Function URL (leave empty for first deployment)
+# After first deployment, run: terraform output -raw function_url
+# Then update this value and re-apply
 function_url = ""
 
+# ========================================
 # Resource Configuration
-memory             = "512Mi"  # Options: 256Mi, 512Mi, 1Gi, 2Gi, etc.
+# ========================================
+
+memory             = "512Mi"  # Options: 256Mi, 512Mi, 1Gi, 2Gi, 4Gi, 8Gi
 timeout_seconds    = 540      # Maximum: 3600 (1 hour)
 max_instance_count = 10       # Maximum concurrent instances
 min_instance_count = 0        # 0 = scale to zero when idle
@@ -26,5 +55,20 @@ labels = {
   application = "v2v2b-interrogator"
   managed-by  = "terraform"
   environment = "production"
-  team        = "engineering"
 }
+
+# ========================================
+# Example Configurations
+# ========================================
+
+# Cost-Optimized (Minimal):
+# memory             = "256Mi"
+# timeout_seconds    = 300
+# max_instance_count = 5
+# min_instance_count = 0
+
+# High-Performance:
+# memory             = "2Gi"
+# timeout_seconds    = 900
+# max_instance_count = 100
+# min_instance_count = 5
