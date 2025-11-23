@@ -58,11 +58,11 @@ jobs:
 
       # Using Workload Identity Federation (Recommended for production)
       # Temporarily disabled for testing
-      # - name: Authenticate to Google Cloud
-      #   uses: google-github-actions/auth@v2
-      #   with:
-      #     workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }} #'projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_ID/providers/PROVIDER_ID'
-      #     service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }} #'your-service-account@your-project.iam.gserviceaccount.com'
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }} #'projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_ID/providers/PROVIDER_ID'
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }} #'your-service-account@your-project.iam.gserviceaccount.com'
 
       # Alternative: Using Service Account Key (less secure, commented out)
       # Uncomment this section and comment out the Workload Identity section above if needed
