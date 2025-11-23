@@ -5,6 +5,7 @@ and processes multimodal inputs (text, audio, images) using Gemini AI.
 """
 
 import os
+import sys
 import logging
 import json
 from datetime import datetime
@@ -30,6 +31,13 @@ import asyncio
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Module-level initialization logging
+logger.info("=" * 80)
+logger.info("V2V2B Interrogator Cloud Function - Module Loading Started")
+logger.info(f"Python version: {sys.version}")
+logger.info(f"Working directory: {os.getcwd()}")
+logger.info("=" * 80)
+
 # Environment variables
 GCP_PROJECT = os.environ.get('GCP_PROJECT')
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
@@ -38,7 +46,41 @@ REPO_NAME = os.environ.get('REPO_NAME')
 FUNCTION_URL = os.environ.get('FUNCTION_URL')
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '')
 OBSIDIAN_DRIVE_FOLDER_ID = os.environ.get('OBSIDIAN_DRIVE_FOLDER_ID', '')
-DRIVE_POLL_INTERVAL = int(os.environ.get('DRIVE_POLL_INTERVAL', '300'))
+
+# Safe integer conversion with error handling
+try:
+    DRIVE_POLL_INTERVAL = int(os.environ.get('DRIVE_POLL_INTERVAL', '300'))
+    logger.info(f"DRIVE_POLL_INTERVAL set to {DRIVE_POLL_INTERVAL} seconds")
+except ValueError as e:
+    logger.warning(f"Invalid DRIVE_POLL_INTERVAL value, using default 300: {e}")
+    DRIVE_POLL_INTERVAL = 300
+
+# Log environment configuration (without exposing secrets)
+logger.info("Environment configuration:")
+logger.info(f"  GCP_PROJECT: {'SET' if GCP_PROJECT else 'NOT SET'}")
+logger.info(f"  GITHUB_TOKEN: {'SET' if GITHUB_TOKEN else 'NOT SET'}")
+logger.info(f"  TELEGRAM_BOT_TOKEN: {'SET' if TELEGRAM_BOT_TOKEN else 'NOT SET'}")
+logger.info(f"  REPO_NAME: {REPO_NAME if REPO_NAME else 'NOT SET'}")
+logger.info(f"  FUNCTION_URL: {FUNCTION_URL if FUNCTION_URL else 'NOT SET'}")
+logger.info(f"  GOOGLE_DRIVE_FOLDER_ID: {'SET' if GOOGLE_DRIVE_FOLDER_ID else 'NOT SET'}")
+logger.info(f"  OBSIDIAN_DRIVE_FOLDER_ID: {'SET' if OBSIDIAN_DRIVE_FOLDER_ID else 'NOT SET'}")
+
+# Validate critical environment variables
+missing_vars = []
+if not GCP_PROJECT:
+    missing_vars.append('GCP_PROJECT')
+if not TELEGRAM_BOT_TOKEN:
+    missing_vars.append('TELEGRAM_BOT_TOKEN')
+if not GITHUB_TOKEN:
+    missing_vars.append('GITHUB_TOKEN')
+if not REPO_NAME:
+    missing_vars.append('REPO_NAME')
+
+if missing_vars:
+    logger.error(f"CRITICAL: Missing required environment variables: {', '.join(missing_vars)}")
+    logger.error("Function may fail when these are accessed")
+else:
+    logger.info("All critical environment variables are set")
 
 # Lazy initialization globals
 _db_client = None
@@ -208,8 +250,28 @@ class GoogleDriveClient:
     """Handles Google Drive operations for transcript monitoring."""
 
     def __init__(self):
-        credentials, _ = default()
-        self.service = build('drive', 'v3', credentials=credentials)
+        self._service = None
+        self._initialized = False
+
+    def _ensure_initialized(self):
+        """Lazy initialization of Drive client to prevent cold start issues."""
+        if self._initialized:
+            return
+
+        try:
+            credentials, _ = default()
+            self._service = build('drive', 'v3', credentials=credentials)
+            self._initialized = True
+            logger.info("Initialized Google Drive client")
+        except Exception as e:
+            logger.error(f"Failed to initialize Drive client: {e}")
+            raise
+
+    @property
+    def service(self):
+        """Lazy-loaded Drive service."""
+        self._ensure_initialized()
+        return self._service
 
     def list_files(self, folder_id: str, file_types: List[str] = None) -> List[Dict[str, Any]]:
         """List files in a Google Drive folder."""
@@ -557,8 +619,40 @@ class GitHubManager:
     """Handles GitHub operations for PR creation."""
 
     def __init__(self):
-        self.github = Github(GITHUB_TOKEN)
-        self.repo = self.github.get_repo(REPO_NAME)
+        self._github = None
+        self._repo = None
+        self._initialized = False
+
+    def _ensure_initialized(self):
+        """Lazy initialization of GitHub client to prevent cold start issues."""
+        if self._initialized:
+            return
+
+        if not GITHUB_TOKEN:
+            raise ValueError("GITHUB_TOKEN not configured")
+        if not REPO_NAME:
+            raise ValueError("REPO_NAME not configured")
+
+        try:
+            self._github = Github(GITHUB_TOKEN)
+            self._repo = self._github.get_repo(REPO_NAME)
+            self._initialized = True
+            logger.info(f"Initialized GitHub client for repo: {REPO_NAME}")
+        except Exception as e:
+            logger.error(f"Failed to initialize GitHub client: {e}")
+            raise
+
+    @property
+    def repo(self):
+        """Lazy-loaded repository reference."""
+        self._ensure_initialized()
+        return self._repo
+
+    @property
+    def github(self):
+        """Lazy-loaded GitHub client."""
+        self._ensure_initialized()
+        return self._github
 
     def create_pr_from_session(self, session_id: str, history: List[Dict[str, str]]) -> str:
         """Create a branch, commit session content, and open PR."""
@@ -731,8 +825,15 @@ class TelegramClient:
 
     def __init__(self):
         if not TELEGRAM_BOT_TOKEN:
+            logger.error("TelegramClient initialization failed: TELEGRAM_BOT_TOKEN not set")
             raise ValueError("TELEGRAM_BOT_TOKEN environment variable not set")
-        self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
+
+        try:
+            self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
+            logger.info("Telegram Bot client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to create Telegram Bot: {e}")
+            raise
 
     def send_message(self, chat_id: int, text: str) -> bool:
         """Send a message to a Telegram chat."""
@@ -1418,21 +1519,41 @@ def jsonify_with_cors(data, status_code=200):
     return add_cors_headers(response)
 
 
+# Module initialization complete
+logger.info("=" * 80)
+logger.info("MODULE INITIALIZATION COMPLETE")
+logger.info("Entry point ready to receive requests")
+logger.info("=" * 80)
+
+
 @functions_framework.http
 def entry_point(request):
     """
     Main entry point for the Cloud Function.
     Routes requests based on method and query parameters.
     """
+    # Extract request ID for tracing
+    request_id = request.headers.get('X-Cloud-Trace-Context', 'no-trace')[:16]
+
+    # Log incoming request details
+    logger.info(f"[{request_id}] === NEW REQUEST ===")
+    logger.info(f"[{request_id}] Method: {request.method}")
+    logger.info(f"[{request_id}] Path: {request.path}")
+    logger.info(f"[{request_id}] Query Args: {dict(request.args)}")
+    logger.info(f"[{request_id}] Origin: {request.headers.get('Origin', 'N/A')}")
+
     try:
         # Handle CORS preflight requests
         if request.method == 'OPTIONS':
+            logger.info(f"[{request_id}] CORS preflight request")
             response = make_response('', 204)
             return add_cors_headers(response)
         # Get query parameters and path
         mode = request.args.get('mode', '')
         session_id = request.args.get('session', '')
         path = request.path
+
+        logger.info(f"[{request_id}] Route: mode={mode}, path={path}, session={session_id}")
 
         # Route A: Telegram Webhook (POST /telegram)
         if request.method == 'POST' and path == '/telegram':
@@ -1501,31 +1622,92 @@ def entry_point(request):
 
         # Route F: Health Check (GET /)
         elif request.method == 'GET' and not mode:
-            return jsonify_with_cors({
+            logger.info(f"[{request_id}] Health check requested")
+
+            health_status = {
                 'status': 'healthy',
                 'service': 'V2V2B Interrogator',
                 'version': '2.0.0',
-                'endpoints': {
-                    'telegram_webhook': 'POST /telegram',
-                    'upload_ui': 'GET /?mode=ui&session=SESSION_ID',
-                    'file_upload': 'POST /?mode=upload&session=SESSION_ID',
-                    'drive_scan': 'GET /?mode=scan',
-                    'drive_webhook': 'POST /?mode=drive_webhook'
-                },
-                'features': [
-                    'Telegram bot',
-                    'Multimodal file analysis',
-                    'Google Drive monitoring',
-                    'Transcript processing (.txt, .m4a)',
-                    'Knowledge base indexing',
-                    'Obsidian vault sync',
-                    'Automated PR creation'
-                ]
-            }, 200)
+                'timestamp': datetime.utcnow().isoformat(),
+            }
+
+            # Check environment variables
+            env_check = {
+                'GCP_PROJECT': bool(GCP_PROJECT),
+                'TELEGRAM_BOT_TOKEN': bool(TELEGRAM_BOT_TOKEN),
+                'GITHUB_TOKEN': bool(GITHUB_TOKEN),
+                'REPO_NAME': bool(REPO_NAME),
+                'FUNCTION_URL': bool(FUNCTION_URL)
+            }
+            health_status['environment'] = env_check
+
+            # Check if all required vars are set
+            all_env_ok = all(env_check.values())
+            if not all_env_ok:
+                health_status['status'] = 'degraded'
+                health_status['warning'] = 'Some environment variables not set'
+                logger.warning(f"[{request_id}] Health check: degraded - missing environment variables")
+
+            # Test lazy initialization of dependencies
+            try:
+                db = get_db()
+                health_status['firestore'] = 'connected'
+                logger.info(f"[{request_id}] Health check: Firestore OK")
+            except Exception as e:
+                health_status['firestore'] = f'error: {str(e)}'
+                health_status['status'] = 'unhealthy'
+                logger.error(f"[{request_id}] Health check: Firestore FAILED - {e}")
+
+            try:
+                ensure_vertexai_initialized()
+                health_status['vertexai'] = 'initialized'
+                logger.info(f"[{request_id}] Health check: Vertex AI OK")
+            except Exception as e:
+                health_status['vertexai'] = f'error: {str(e)}'
+                health_status['status'] = 'unhealthy'
+                logger.error(f"[{request_id}] Health check: Vertex AI FAILED - {e}")
+
+            health_status['endpoints'] = {
+                'telegram_webhook': 'POST /telegram',
+                'upload_ui': 'GET /?mode=ui&session=SESSION_ID',
+                'file_upload': 'POST /?mode=upload&session=SESSION_ID',
+                'drive_scan': 'GET /?mode=scan',
+                'drive_webhook': 'POST /?mode=drive_webhook'
+            }
+
+            health_status['features'] = [
+                'Telegram bot',
+                'Multimodal file analysis',
+                'Google Drive monitoring',
+                'Transcript processing (.txt, .m4a)',
+                'Knowledge base indexing',
+                'Obsidian vault sync',
+                'Automated PR creation'
+            ]
+
+            status_code = 200 if health_status['status'] == 'healthy' else 503
+            logger.info(f"[{request_id}] Health check result: {health_status['status']}")
+
+            return jsonify_with_cors(health_status, status_code)
 
         else:
             return jsonify_with_cors({'error': 'Invalid request'}, 400)
 
     except Exception as e:
-        logger.error(f"Unhandled error in entry_point: {e}", exc_info=True)
-        return jsonify_with_cors({'error': str(e)}, 500)
+        logger.error(f"[{request_id}] Unhandled error in entry_point: {e}", exc_info=True)
+        logger.error(f"[{request_id}] Error type: {type(e).__name__}")
+        logger.error(f"[{request_id}] Error args: {e.args}")
+
+        # Return detailed error for debugging
+        error_detail = {
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'request_id': request_id
+        }
+
+        # Include traceback in development mode
+        if os.environ.get('ENV') == 'development':
+            import traceback
+            error_detail['traceback'] = traceback.format_exc()
+
+        return jsonify_with_cors(error_detail, 500)
