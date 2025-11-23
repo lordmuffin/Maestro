@@ -1288,8 +1288,8 @@ def get_upload_ui_html(session_id: str) -> str:
                 <div class="upload-area" id="uploadArea">
                     <div class="file-icon">📁</div>
                     <div class="upload-text">Click to select or drag & drop</div>
-                    <div class="file-types">Audio or Image files</div>
-                    <input type="file" id="fileInput" name="file" accept="audio/*,image/*" required>
+                    <div class="file-types">Audio, Image, or Text files</div>
+                    <input type="file" id="fileInput" name="file" accept="audio/*,image/*,text/plain,.txt,.md" required>
                 </div>
 
                 <div class="selected-file" id="selectedFile">
