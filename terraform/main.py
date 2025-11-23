@@ -424,7 +424,7 @@ class GeminiClient:
     """Handles interactions with Vertex AI Gemini models."""
 
     def __init__(self):
-        self.model = GenerativeModel("gemini-1.5-flash-002")
+        self.model = GenerativeModel("gemini-2.5-flash")
 
     def chat_response(self, user_message: str, history: List[Dict[str, str]]) -> str:
         """Generate a chat response with context."""
