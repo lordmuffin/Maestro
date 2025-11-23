@@ -27,6 +27,7 @@ from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import TelegramError
 import asyncio
 import io
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -943,30 +944,39 @@ class TelegramClient:
     def download_file(self, file_id: str) -> Optional[bytes]:
         """Download a file from Telegram using file_id."""
         try:
-            async def _download():
-                file = await self.bot.get_file(file_id)
-                file_bytes = await file.download_as_bytearray()
-                return bytes(file_bytes)
+            # Use synchronous HTTP requests instead of async to avoid event loop issues
+            logger.info(f"Getting file path for file_id: {file_id}")
 
-            # Handle both new event loop and existing event loop scenarios
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If loop is already running, create a new one in a thread
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, _download())
-                        result = future.result(timeout=30)
-                else:
-                    result = loop.run_until_complete(_download())
-            except RuntimeError:
-                # No event loop, create one
-                result = asyncio.run(_download())
+            # First, get the file path from Telegram
+            get_file_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getFile?file_id={file_id}"
+            response = requests.get(get_file_url, timeout=10)
+            response.raise_for_status()
 
-            logger.info(f"Downloaded file {file_id}, size: {len(result)} bytes")
-            return result
-        except TelegramError as e:
-            logger.error(f"Error downloading file from Telegram: {e}", exc_info=True)
+            file_info = response.json()
+            if not file_info.get('ok'):
+                logger.error(f"getFile API returned not ok: {file_info}")
+                return None
+
+            file_path = file_info['result'].get('file_path')
+            if not file_path:
+                logger.error(f"No file_path in response: {file_info}")
+                return None
+
+            logger.info(f"File path retrieved: {file_path}")
+
+            # Download the actual file
+            download_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
+            logger.info(f"Downloading from: {download_url[:80]}...")
+
+            download_response = requests.get(download_url, timeout=30)
+            download_response.raise_for_status()
+
+            file_data = download_response.content
+            logger.info(f"Downloaded file {file_id}, size: {len(file_data)} bytes")
+            return file_data
+
+        except requests.RequestException as e:
+            logger.error(f"HTTP error downloading file from Telegram: {e}", exc_info=True)
             return None
         except Exception as e:
             logger.error(f"Unexpected error downloading file: {e}", exc_info=True)
