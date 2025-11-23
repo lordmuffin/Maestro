@@ -40,11 +40,27 @@ GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '')
 OBSIDIAN_DRIVE_FOLDER_ID = os.environ.get('OBSIDIAN_DRIVE_FOLDER_ID', '')
 DRIVE_POLL_INTERVAL = int(os.environ.get('DRIVE_POLL_INTERVAL', '300'))
 
-# Initialize Firestore
-db = firestore.Client(project=GCP_PROJECT)
+# Lazy initialization globals
+_db_client = None
+_vertexai_initialized = False
 
-# Initialize Vertex AI
-vertexai.init(project=GCP_PROJECT, location="us-central1")
+
+def get_db():
+    """Lazy-load Firestore client to prevent cold start crashes."""
+    global _db_client
+    if _db_client is None:
+        _db_client = firestore.Client(project=GCP_PROJECT)
+        logger.info("Initialized Firestore client")
+    return _db_client
+
+
+def ensure_vertexai_initialized():
+    """Lazy-load Vertex AI initialization to prevent cold start crashes."""
+    global _vertexai_initialized
+    if not _vertexai_initialized:
+        vertexai.init(project=GCP_PROJECT, location="us-central1")
+        _vertexai_initialized = True
+        logger.info("Initialized Vertex AI")
 
 
 # Prompt Loading Functions
@@ -107,11 +123,16 @@ Format as a markdown checklist suitable for a GitHub PR."""
     return fallbacks.get(prompt_filename, "You are a helpful AI assistant.")
 
 
-# Load system prompts from files
-CHAT_SYSTEM_PROMPT = load_prompt("telegram_chat_prompt.md")
-MULTIMODAL_SYSTEM_PROMPT = load_prompt("multimodal_analysis_prompt.md")
-TRANSCRIPT_ANALYSIS_PROMPT = load_prompt("transcript_analysis_prompt.md")
-INTERROGATION_PR_PROMPT = load_prompt("interrogation_questions_prompt.md")
+# Lazy prompt loading cache
+_prompts_cache = {}
+
+
+def get_prompt(prompt_name: str) -> str:
+    """Lazy-load prompts with caching to prevent cold start I/O issues."""
+    if prompt_name not in _prompts_cache:
+        _prompts_cache[prompt_name] = load_prompt(prompt_name)
+        logger.info(f"Loaded and cached prompt: {prompt_name}")
+    return _prompts_cache[prompt_name]
 
 
 class FirestoreManager:
@@ -120,7 +141,7 @@ class FirestoreManager:
     @staticmethod
     def get_session_ref(session_id: str):
         """Get Firestore document reference for a session."""
-        return db.collection('sessions').document(session_id)
+        return get_db().collection('sessions').document(session_id)
 
     @staticmethod
     def save_message(session_id: str, role: str, content: str, space_name: str = None):
@@ -278,7 +299,7 @@ class KnowledgeBaseManager:
     def index_transcript(file_id: str, filename: str, content: str, summary: str, metadata: Dict[str, Any]):
         """Index a transcript in Firestore for search and retrieval."""
         try:
-            kb_ref = db.collection('knowledge_base').document(file_id)
+            kb_ref = get_db().collection('knowledge_base').document(file_id)
             kb_ref.set({
                 'file_id': file_id,
                 'filename': filename,
@@ -300,7 +321,7 @@ class KnowledgeBaseManager:
         try:
             # Simple text search - in production, use vector embeddings
             results = []
-            kb_docs = db.collection('knowledge_base').order_by('indexed_at', direction=firestore.Query.DESCENDING).limit(20).stream()
+            kb_docs = get_db().collection('knowledge_base').order_by('indexed_at', direction=firestore.Query.DESCENDING).limit(20).stream()
 
             for doc in kb_docs:
                 data = doc.to_dict()
@@ -320,7 +341,7 @@ class KnowledgeBaseManager:
     def get_all_transcripts(limit: int = 50) -> List[Dict[str, Any]]:
         """Get all indexed transcripts."""
         try:
-            docs = db.collection('knowledge_base').order_by('indexed_at', direction=firestore.Query.DESCENDING).limit(limit).stream()
+            docs = get_db().collection('knowledge_base').order_by('indexed_at', direction=firestore.Query.DESCENDING).limit(limit).stream()
             transcripts = [doc.to_dict() for doc in docs]
             return transcripts
         except Exception as e:
@@ -331,7 +352,7 @@ class KnowledgeBaseManager:
     def mark_as_processed(file_id: str):
         """Mark a file as processed to avoid duplicate processing."""
         try:
-            processed_ref = db.collection('processed_files').document(file_id)
+            processed_ref = get_db().collection('processed_files').document(file_id)
             processed_ref.set({
                 'file_id': file_id,
                 'processed_at': firestore.SERVER_TIMESTAMP
@@ -343,7 +364,7 @@ class KnowledgeBaseManager:
     def is_processed(file_id: str) -> bool:
         """Check if a file has already been processed."""
         try:
-            doc = db.collection('processed_files').document(file_id).get()
+            doc = get_db().collection('processed_files').document(file_id).get()
             return doc.exists
         except Exception as e:
             logger.error(f"Error checking if file is processed: {e}")
@@ -448,7 +469,7 @@ class TranscriptProcessor:
     def analyze_transcript(self, transcript_text: str) -> str:
         """Analyze transcript using Gemini to extract insights."""
         try:
-            prompt = f"{TRANSCRIPT_ANALYSIS_PROMPT}\n\nTranscript:\n{transcript_text}"
+            prompt = f"{get_prompt('transcript_analysis_prompt.md')}\n\nTranscript:\n{transcript_text}"
             response = self.gemini.model.generate_content(prompt)
             return response.text
         except Exception as e:
@@ -458,7 +479,7 @@ class TranscriptProcessor:
     def generate_interrogation_questions(self, analysis: str) -> str:
         """Generate interrogation questions based on analysis."""
         try:
-            prompt = f"{INTERROGATION_PR_PROMPT}\n\nAnalysis:\n{analysis}"
+            prompt = f"{get_prompt('interrogation_questions_prompt.md')}\n\nAnalysis:\n{analysis}"
             response = self.gemini.model.generate_content(prompt)
             return response.text
         except Exception as e:
@@ -470,6 +491,7 @@ class GeminiClient:
     """Handles interactions with Vertex AI Gemini models."""
 
     def __init__(self):
+        ensure_vertexai_initialized()
         self.model = GenerativeModel("gemini-2.5-flash")
 
     def chat_response(self, user_message: str, history: List[Dict[str, str]]) -> str:
@@ -481,7 +503,7 @@ class GeminiClient:
             # Add system instruction as first user message with context
             contents.append(Content(
                 role="user",
-                parts=[Part.from_text(CHAT_SYSTEM_PROMPT)]
+                parts=[Part.from_text(get_prompt('telegram_chat_prompt.md'))]
             ))
             contents.append(Content(
                 role="model",
@@ -521,7 +543,7 @@ class GeminiClient:
                 return f"Unsupported file type: {mime_type}"
 
             # Create prompt
-            prompt_part = Part.from_text(f"{MULTIMODAL_SYSTEM_PROMPT}\n\nFile: {filename}")
+            prompt_part = Part.from_text(f"{get_prompt('multimodal_analysis_prompt.md')}\n\nFile: {filename}")
 
             # Generate analysis
             response = self.model.generate_content([prompt_part, part])
@@ -1390,6 +1412,12 @@ def add_cors_headers(response):
     return response
 
 
+def jsonify_with_cors(data, status_code=200):
+    """Create JSON response with CORS headers to ensure all responses include CORS."""
+    response = make_response(jsonify(data), status_code)
+    return add_cors_headers(response)
+
+
 @functions_framework.http
 def entry_point(request):
     """
@@ -1411,11 +1439,11 @@ def entry_point(request):
             # Parse Telegram Update
             update_data = request.get_json(silent=True)
             if not update_data:
-                return jsonify({'error': 'Invalid request body'}), 400
+                return jsonify_with_cors({'error': 'Invalid request body'}, 400)
 
             handler = TelegramWebhookHandler()
             response = handler.handle(update_data)
-            return jsonify(response)
+            return jsonify_with_cors(response)
 
         # Route B: Upload UI (GET /?mode=ui&session=...)
         elif request.method == 'GET' and mode == 'ui':
@@ -1461,8 +1489,7 @@ def entry_point(request):
         elif request.method == 'GET' and mode == 'scan':
             handler = DriveMonitorHandler()
             result = handler.scan_and_process_new_files()
-            response = make_response(jsonify(result), 200)
-            return add_cors_headers(response)
+            return jsonify_with_cors(result, 200)
 
         # Route E: Drive Webhook Handler (POST /?mode=drive_webhook)
         elif request.method == 'POST' and mode == 'drive_webhook':
@@ -1470,12 +1497,11 @@ def entry_point(request):
             # This will be called when new files are added to the watched folder
             handler = DriveMonitorHandler()
             result = handler.scan_and_process_new_files()
-            response = make_response(jsonify(result), 200)
-            return add_cors_headers(response)
+            return jsonify_with_cors(result, 200)
 
         # Route F: Health Check (GET /)
         elif request.method == 'GET' and not mode:
-            response = make_response(jsonify({
+            return jsonify_with_cors({
                 'status': 'healthy',
                 'service': 'V2V2B Interrogator',
                 'version': '2.0.0',
@@ -1495,14 +1521,11 @@ def entry_point(request):
                     'Obsidian vault sync',
                     'Automated PR creation'
                 ]
-            }), 200)
-            return add_cors_headers(response)
+            }, 200)
 
         else:
-            response = make_response(jsonify({'error': 'Invalid request'}), 400)
-            return add_cors_headers(response)
+            return jsonify_with_cors({'error': 'Invalid request'}, 400)
 
     except Exception as e:
         logger.error(f"Unhandled error in entry_point: {e}", exc_info=True)
-        response = make_response(jsonify({'error': str(e)}), 500)
-        return add_cors_headers(response)
+        return jsonify_with_cors({'error': str(e)}, 500)
