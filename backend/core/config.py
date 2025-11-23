@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     
     # Security
-    allowed_origins: str = "http://localhost:3000,http://localhost:8000"
+    allowed_origins: str = "http://localhost:3000,http://localhost:8000,http://localhost:5173"
     jwt_secret: str = "change_me"
     jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = 24
