@@ -362,12 +362,31 @@ class GoogleDriveClient:
     def download_file(self, file_id: str) -> Optional[bytes]:
         """Download file content from Google Drive."""
         try:
-            request = self.service.files().get_media(fileId=file_id)
+            # First, get file metadata to check MIME type
+            metadata = self.get_file_metadata(file_id)
+            if not metadata:
+                logger.error(f"Could not get metadata for file {file_id}")
+                return None
+
+            mime_type = metadata.get('mimeType', '')
+            logger.info(f"Downloading file {file_id} with MIME type: {mime_type}")
+
+            # Handle Google Docs native formats - export as plain text
+            if mime_type == 'application/vnd.google-apps.document':
+                logger.info(f"File is Google Doc, exporting as plain text")
+                request = self.service.files().export_media(
+                    fileId=file_id,
+                    mimeType='text/plain'
+                )
+            else:
+                # Regular file download
+                request = self.service.files().get_media(fileId=file_id)
+
             file_data = request.execute()
             logger.info(f"Downloaded file {file_id}, size: {len(file_data)} bytes")
             return file_data
         except Exception as e:
-            logger.error(f"Error downloading file {file_id}: {e}")
+            logger.error(f"Error downloading file {file_id}: {e}", exc_info=True)
             return None
 
     def get_file_metadata(self, file_id: str) -> Optional[Dict[str, Any]]:
@@ -1650,8 +1669,9 @@ class DriveMonitorHandler:
                 return {'success': False, 'filename': filename, 'error': 'Download failed'}
 
             # Process based on file type
-            # Support text files (.txt and .md)
-            if (mime_type in ['text/plain', 'text/markdown', 'application/octet-stream'] or
+            # Support text files (.txt and .md) and Google Docs
+            if (mime_type in ['text/plain', 'text/markdown', 'application/octet-stream',
+                             'application/vnd.google-apps.document'] or
                 filename.endswith('.txt') or filename.endswith('.md')):
                 try:
                     transcript = self.transcript_processor.process_text_transcript(file_data.decode('utf-8'))
