@@ -297,6 +297,99 @@ class FirestoreManager:
             logger.error(f"Error deleting pending validation: {e}")
             raise
 
+    @staticmethod
+    def create_interviewer_session(session_id: str, source_file_id: Optional[str],
+                                   source_file_path: Optional[str], original_content: str) -> Dict[str, Any]:
+        """Create a new interviewer session for transcript refinement."""
+        try:
+            session_ref = get_db().collection('interviewer_sessions').document(session_id)
+            session_data = {
+                'session_id': session_id,
+                'active': True,
+                'completed': False,
+                'source_file_id': source_file_id,
+                'source_file_path': source_file_path,
+                'original_content': original_content,
+                'clarifications': [],
+                'refined_notes': None,
+                'started_at': firestore.SERVER_TIMESTAMP,
+                'completed_at': None,
+                'obsidian_path': None
+            }
+            session_ref.set(session_data)
+            logger.info(f"Created interviewer session {session_id}")
+            return session_data
+        except Exception as e:
+            logger.error(f"Error creating interviewer session: {e}")
+            raise
+
+    @staticmethod
+    def is_interviewer_active(session_id: str) -> bool:
+        """Check if an interviewer session is currently active."""
+        try:
+            session_ref = get_db().collection('interviewer_sessions').document(session_id)
+            doc = session_ref.get()
+            if doc.exists:
+                data = doc.to_dict()
+                return data.get('active', False) and not data.get('completed', False)
+            return False
+        except Exception as e:
+            logger.error(f"Error checking interviewer session: {e}")
+            return False
+
+    @staticmethod
+    def get_interviewer_session(session_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve interviewer session data."""
+        try:
+            session_ref = get_db().collection('interviewer_sessions').document(session_id)
+            doc = session_ref.get()
+            if doc.exists:
+                return doc.to_dict()
+            return None
+        except Exception as e:
+            logger.error(f"Error retrieving interviewer session: {e}")
+            return None
+
+    @staticmethod
+    def add_clarification(session_id: str, question: str, answer: str) -> None:
+        """Add a Q&A clarification to the interviewer session."""
+        try:
+            session_ref = get_db().collection('interviewer_sessions').document(session_id)
+            doc = session_ref.get()
+            if doc.exists:
+                data = doc.to_dict()
+                clarifications = data.get('clarifications', [])
+                clarifications.append({
+                    'question': question,
+                    'answer': answer,
+                    'timestamp': datetime.now(datetime.timezone.utc).isoformat()
+                })
+                session_ref.update({
+                    'clarifications': clarifications,
+                    'last_updated': firestore.SERVER_TIMESTAMP
+                })
+                logger.info(f"Added clarification to session {session_id}")
+        except Exception as e:
+            logger.error(f"Error adding clarification: {e}")
+            raise
+
+    @staticmethod
+    def complete_interviewer_session(session_id: str, refined_notes: str, obsidian_path: str) -> None:
+        """Mark interviewer session as completed."""
+        try:
+            session_ref = get_db().collection('interviewer_sessions').document(session_id)
+            session_ref.update({
+                'active': False,
+                'completed': True,
+                'refined_notes': refined_notes,
+                'obsidian_path': obsidian_path,
+                'completed_at': firestore.SERVER_TIMESTAMP
+            })
+            logger.info(f"Completed interviewer session {session_id}")
+        except Exception as e:
+            logger.error(f"Error completing interviewer session: {e}")
+            raise
+
 
 class GoogleDriveClient:
     """Handles Google Drive operations for transcript monitoring."""
@@ -423,6 +516,30 @@ class GoogleDriveClient:
         except Exception as e:
             logger.error(f"Error uploading file to Drive: {e}")
             return None
+
+    def update_file_content(self, file_id: str, new_content: str) -> bool:
+        """Update existing Google Drive file with new content (e.g., add #MaestroProcessed tag)."""
+        try:
+            from googleapiclient.http import MediaInMemoryUpload
+
+            # Get current file metadata to preserve MIME type
+            metadata = self.get_file_metadata(file_id)
+            mime_type = metadata.get('mimeType', 'text/plain') if metadata else 'text/plain'
+
+            # Create media upload with new content
+            media = MediaInMemoryUpload(new_content.encode('utf-8'), mimetype=mime_type)
+
+            # Update file content (preserves filename and parent folders)
+            self.service.files().update(
+                fileId=file_id,
+                media_body=media
+            ).execute()
+
+            logger.info(f"Updated content for file_id: {file_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating file content in Drive: {e}")
+            return False
 
 
 class KnowledgeBaseManager:
@@ -1076,7 +1193,7 @@ class TelegramWebhookHandler:
             message_text = message.get('text', '').strip()
 
             # Generate session ID using Telegram user_id
-            date_str = datetime.utcnow().strftime('%Y-%m-%d')
+            date_str = datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
             session_id = f"telegram_{user_id}_{date_str}"
 
             logger.info(f"Processing message from user {username} (ID: {user_id}), chat_id: {chat_id}: {message_text}")
@@ -1159,8 +1276,13 @@ class TelegramWebhookHandler:
         return {'status': 'ok'}
 
     def _handle_done_request(self, session_id: str, chat_id: int) -> Dict[str, Any]:
-        """Handle /done command - complete session."""
+        """Handle /done command - complete session or interviewer refinement."""
         try:
+            # Check if interviewer mode is active
+            if FirestoreManager.is_interviewer_active(session_id):
+                return self._handle_interview_complete(session_id, chat_id)
+
+            # Regular /done flow (create PR)
             history = FirestoreManager.get_session_history(session_id)
 
             if not history:
@@ -1177,6 +1299,154 @@ class TelegramWebhookHandler:
             logger.error(f"Error handling /done request: {e}")
             self.telegram_client.send_message(chat_id, f'❌ Error creating PR: {str(e)}')
             return {'status': 'error'}
+
+    def _handle_interview_complete(self, session_id: str, chat_id: int) -> Dict[str, Any]:
+        """Finalize interviewer session and save refined notes to Obsidian."""
+        try:
+            self.telegram_client.send_message(chat_id, '⏳ Finalizing your notes...')
+
+            # Get interviewer session data
+            session = FirestoreManager.get_interviewer_session(session_id)
+            if not session:
+                self.telegram_client.send_message(chat_id, '❌ No active interview session found.')
+                return {'status': 'error'}
+
+            # Build context with all clarifications
+            clarifications = session.get('clarifications', [])
+            clarification_text = "\n\n".join([
+                f"**Q:** {c['question']}\n**A:** {c['answer']}"
+                for c in clarifications
+            ])
+
+            # Load interviewer prompt and generate final structured notes (Phase 3)
+            interviewer_prompt = get_prompt("interviewer_prompt.md")
+            finalization_message = f"""{interviewer_prompt}
+
+**ORIGINAL TRANSCRIPT:**
+{session['original_content']}
+
+**ALL CLARIFICATIONS:**
+{clarification_text}
+
+PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsidian-compatible markdown format with YAML frontmatter, following all requirements from the prompt."""
+
+            # Generate final structured notes
+            history = FirestoreManager.get_session_history(session_id)
+            final_notes = self.gemini.chat_response(finalization_message, history)
+
+            # Extract title from the notes
+            title = self._extract_title_from_markdown(final_notes)
+
+            # Save refined notes to Obsidian
+            try:
+                from backend.core.rag.obsidian_writer import save_to_obsidian
+
+                new_file_path = save_to_obsidian(
+                    content=final_notes,
+                    title=title,
+                    subfolder="Interviews",
+                    auto_tag=True
+                )
+
+                logger.info(f"Saved refined notes to Obsidian: {new_file_path}")
+
+            except Exception as obsidian_error:
+                logger.error(f"Failed to save to Obsidian: {obsidian_error}")
+                self.telegram_client.send_message(
+                    chat_id,
+                    f'⚠️ Notes finalized but failed to save to Obsidian:\n{str(obsidian_error)}\n\nNotes are saved in session history.'
+                )
+                new_file_path = None
+
+            # Tag source document with #MaestroProcessed
+            if session.get('source_file_id'):
+                # Google Drive source - update file
+                try:
+                    original_content = self.drive_client.download_file(session['source_file_id'])
+                    if original_content:
+                        tagged_content = self._add_processed_tag(original_content.decode('utf-8'))
+                        self.drive_client.update_file_content(session['source_file_id'], tagged_content)
+                        logger.info(f"Tagged source file in Drive: {session['source_file_id']}")
+                except Exception as tag_error:
+                    logger.error(f"Failed to tag source file: {tag_error}")
+            else:
+                # Telegram upload - save raw version to Obsidian
+                if new_file_path:  # Only if Obsidian is accessible
+                    try:
+                        save_to_obsidian(
+                            content=self._add_processed_tag(session['original_content']),
+                            title=f"Raw - {title}",
+                            subfolder="Raw Uploads",
+                            auto_tag=False
+                        )
+                        logger.info("Saved raw transcript with #MaestroProcessed tag")
+                    except Exception as raw_error:
+                        logger.error(f"Failed to save raw transcript: {raw_error}")
+
+            # Mark session as completed in Firebase
+            FirestoreManager.complete_interviewer_session(
+                session_id,
+                refined_notes=final_notes,
+                obsidian_path=str(new_file_path) if new_file_path else "Not saved to Obsidian"
+            )
+
+            # Generate and send summary
+            summary = self._generate_summary(session, new_file_path)
+            self.telegram_client.send_message(chat_id, summary)
+
+            return {'status': 'ok'}
+
+        except Exception as e:
+            logger.error(f"Error completing interview: {e}", exc_info=True)
+            self.telegram_client.send_message(chat_id, f'❌ Error finalizing notes: {str(e)}')
+            return {'status': 'error'}
+
+    def _add_processed_tag(self, content: str) -> str:
+        """Add #MaestroProcessed tag to content if not present."""
+        if "#MaestroProcessed" in content:
+            return content
+        return f"{content.rstrip()}\n\n#MaestroProcessed\n"
+
+    def _extract_title_from_markdown(self, markdown: str) -> str:
+        """Extract title from YAML frontmatter or first H1 heading."""
+        import re
+
+        # Try to extract from YAML frontmatter
+        yaml_match = re.search(r'^---\s*\n.*?^title:\s*(.+?)$.*?^---', markdown, re.MULTILINE | re.DOTALL)
+        if yaml_match:
+            return yaml_match.group(1).strip()
+
+        # Try to find first H1 heading
+        h1_match = re.search(r'^#\s+(.+)$', markdown, re.MULTILINE)
+        if h1_match:
+            return h1_match.group(1).strip()
+
+        # Fallback to date-based title
+        return f"Interview {datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+
+    def _generate_summary(self, session: Dict[str, Any], file_path: Optional[Path]) -> str:
+        """Generate completion summary for user."""
+        clarification_count = len(session.get('clarifications', []))
+
+        summary = "✅ *Interview Complete!*\n\n"
+
+        if file_path:
+            summary += f"📝 *Refined Notes Saved*\n"
+            summary += f"   • File: `{file_path.name}`\n"
+            summary += f"   • Location: `{file_path.parent.name}/`\n\n"
+        else:
+            summary += "⚠️ *Notes finalized but not saved to Obsidian*\n\n"
+
+        summary += f"💬 *Session Stats*\n"
+        summary += f"   • Clarifications: {clarification_count} rounds\n"
+        summary += f"   • Source: {'Drive' if session.get('source_file_id') else 'Telegram upload'}\n"
+
+        if session.get('source_file_id') or file_path:
+            summary += f"\n🏷️ *Tagged*: #MaestroProcessed added to source\n"
+
+        summary += f"\nYour structured notes are ready! 🎉"
+
+        return summary
 
     def _handle_file_upload(self, session_id: str, chat_id: int, message: Dict[str, Any]) -> Dict[str, Any]:
         """Handle file uploads via Telegram (audio, voice, photo, document, video)."""
@@ -1257,25 +1527,29 @@ class TelegramWebhookHandler:
             except UnicodeDecodeError:
                 content = file_data.decode('latin-1')  # Fallback encoding
 
-            # Generate structured notes using validation prompt
-            structured_notes = self._generate_structured_notes(content, filename, 'text')
-
-            # Create validation ID
-            validation_id = f"{session_id}_{file_id}"
-
-            # Save to pending validations
-            FirestoreManager.save_pending_validation(
-                validation_id=validation_id,
+            # Activate interviewer mode for transcript refinement
+            FirestoreManager.create_interviewer_session(
                 session_id=session_id,
-                chat_id=chat_id,
-                file_type='text',
-                filename=filename,
-                content=content,
-                structured_notes=structured_notes
+                source_file_id=None,  # Telegram upload, no Drive source
+                source_file_path=None,
+                original_content=content
             )
 
-            # Send preview with validation buttons
-            self._send_validation_prompt(chat_id, filename, structured_notes, validation_id)
+            # Load interviewer prompt and analyze transcript
+            interviewer_prompt = get_prompt("interviewer_prompt.md")
+            initial_message = f"{interviewer_prompt}\n\n**TRANSCRIPT TO ANALYZE:**\n\n{content}"
+
+            # Generate initial clarifying questions
+            initial_questions = self.gemini.chat_response(initial_message, [])
+
+            # Save initial bot message to session history
+            FirestoreManager.save_message(session_id, 'assistant', initial_questions, str(chat_id))
+
+            # Send questions to user
+            self.telegram_client.send_message(
+                chat_id,
+                f"📝 *Transcript Analysis Started*\n\n{initial_questions}\n\n_Type your answers or '/DONE' when ready to finalize._"
+            )
 
             return {'status': 'ok'}
 
@@ -1334,7 +1608,7 @@ class TelegramWebhookHandler:
         try:
             file_id = voice['file_id']
             duration = voice.get('duration', 0)
-            filename = f"voice_recording_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.ogg"
+            filename = f"voice_recording_{datetime.now(datetime.timezone.utc).strftime('%Y%m%d_%H%M%S')}.ogg"
 
             self.telegram_client.send_message(chat_id, f'🎤 Processing voice recording ({duration}s)...')
 
@@ -1345,28 +1619,31 @@ class TelegramWebhookHandler:
                 return {'status': 'error'}
 
             # Transcribe and analyze with Gemini (audio/ogg format)
-            analysis = self.gemini.analyze_multimodal(file_data, 'audio/ogg', filename)
+            transcript = self.gemini.analyze_multimodal(file_data, 'audio/ogg', filename)
 
-            # Generate structured notes
-            structured_notes = self._generate_structured_notes(analysis, filename, 'voice')
-
-            # Create validation ID
-            validation_id = f"{session_id}_{file_id}"
-
-            # Save to pending validations
-            FirestoreManager.save_pending_validation(
-                validation_id=validation_id,
+            # Activate interviewer mode for transcript refinement
+            FirestoreManager.create_interviewer_session(
                 session_id=session_id,
-                chat_id=chat_id,
-                file_type='voice',
-                filename=filename,
-                content=analysis,
-                structured_notes=structured_notes,
-                file_data=file_data
+                source_file_id=None,  # Telegram upload, no Drive source
+                source_file_path=None,
+                original_content=transcript
             )
 
-            # Send preview with validation buttons
-            self._send_validation_prompt(chat_id, filename, structured_notes, validation_id)
+            # Load interviewer prompt and analyze transcript
+            interviewer_prompt = get_prompt("interviewer_prompt.md")
+            initial_message = f"{interviewer_prompt}\n\n**TRANSCRIPT TO ANALYZE:**\n\n{transcript}"
+
+            # Generate initial clarifying questions
+            initial_questions = self.gemini.chat_response(initial_message, [])
+
+            # Save initial bot message to session history
+            FirestoreManager.save_message(session_id, 'assistant', initial_questions, str(chat_id))
+
+            # Send questions to user
+            self.telegram_client.send_message(
+                chat_id,
+                f"📝 *Voice Transcript Analysis Started*\n\n{initial_questions}\n\n_Type your answers or '/DONE' when ready to finalize._"
+            )
 
             return {'status': 'ok'}
 
@@ -1565,9 +1842,79 @@ class TelegramWebhookHandler:
             self.telegram_client.send_message(chat_id, f'❌ Error rejecting file: {str(e)}')
             return {'status': 'error'}
 
+    def _handle_interviewer_response(self, session_id: str, chat_id: int, user_response: str) -> Dict[str, Any]:
+        """Handle user responses during interviewer mode."""
+        try:
+            # Get interviewer session
+            session = FirestoreManager.get_interviewer_session(session_id)
+            if not session:
+                logger.error(f"Interviewer session not found: {session_id}")
+                return {'status': 'error'}
+
+            # Save user message to regular session history
+            FirestoreManager.save_message(session_id, 'user', user_response, str(chat_id))
+
+            # Get the last assistant question from session history
+            history = FirestoreManager.get_session_history(session_id)
+            last_question = ""
+            if len(history) >= 1:
+                for msg in reversed(history):
+                    if msg.get('role') == 'assistant':
+                        last_question = msg.get('content', '')
+                        break
+
+            # Add clarification to interviewer session
+            FirestoreManager.add_clarification(session_id, last_question, user_response)
+
+            # Build context with all clarifications
+            clarifications = session.get('clarifications', [])
+            clarification_text = "\n\n".join([
+                f"**Q:** {c['question']}\n**A:** {c['answer']}"
+                for c in clarifications
+            ])
+
+            # Load interviewer prompt and generate next question
+            interviewer_prompt = get_prompt("interviewer_prompt.md")
+            context_message = f"""{interviewer_prompt}
+
+**ORIGINAL TRANSCRIPT:**
+{session['original_content']}
+
+**CLARIFICATIONS SO FAR:**
+{clarification_text}
+
+**USER'S LATEST RESPONSE:**
+{user_response}
+
+Continue the interview process. Ask follow-up clarifying questions if needed, or indicate if you have enough information to proceed to finalization."""
+
+            # Generate next question or confirmation
+            next_response = self.gemini.chat_response(context_message, history)
+
+            # Save bot response
+            FirestoreManager.save_message(session_id, 'assistant', next_response, str(chat_id))
+
+            # Send to user
+            self.telegram_client.send_message(
+                chat_id,
+                f"{next_response}\n\n_Type your answer or '/DONE' to finalize the notes._"
+            )
+
+            return {'status': 'ok'}
+
+        except Exception as e:
+            logger.error(f"Error handling interviewer response: {e}", exc_info=True)
+            self.telegram_client.send_message(chat_id, '❌ Error processing your response. Please try again.')
+            return {'status': 'error'}
+
     def _handle_chat_message(self, session_id: str, chat_id: int, username: str, message_text: str) -> Dict[str, Any]:
         """Handle regular chat message."""
         try:
+            # Check if interviewer mode is active
+            if FirestoreManager.is_interviewer_active(session_id):
+                return self._handle_interviewer_response(session_id, chat_id, message_text)
+
+            # Regular chat flow
             # Save user message (use chat_id as space_name)
             FirestoreManager.save_message(session_id, 'user', message_text, str(chat_id))
 
