@@ -24,8 +24,6 @@ from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from google.auth import default
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import TelegramError
-import asyncio
 import io
 import requests
 
@@ -908,34 +906,66 @@ class TelegramClient:
             logger.error(f"Failed to create Telegram Bot: {e}")
             raise
 
+    @staticmethod
+    def _escape_markdown(text: str) -> str:
+        """Escape special Markdown characters for Telegram."""
+        # Escape Markdown special characters
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        escaped_text = text
+        for char in special_chars:
+            escaped_text = escaped_text.replace(char, f'\\{char}')
+        return escaped_text
+
     def send_message(self, chat_id: int, text: str, reply_markup=None) -> bool:
-        """Send a message to a Telegram chat."""
+        """Send a message to a Telegram chat using synchronous HTTP."""
         try:
-            async def _send():
-                await self.bot.send_message(
-                    chat_id=chat_id,
-                    text=text,
-                    parse_mode='Markdown',
-                    reply_markup=reply_markup
-                )
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-            # Handle both new event loop and existing event loop scenarios
+            # Prepare payload
+            payload = {
+                'chat_id': chat_id,
+                'text': text,
+                'parse_mode': 'Markdown'
+            }
+
+            # Add reply markup if provided (for inline keyboards)
+            if reply_markup:
+                payload['reply_markup'] = reply_markup.to_json()
+
+            # Try sending with Markdown first
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, _send())
-                        future.result(timeout=10)
-                else:
-                    loop.run_until_complete(_send())
-            except RuntimeError:
-                asyncio.run(_send())
+                response = requests.post(url, json=payload, timeout=10)
+                response.raise_for_status()
 
-            logger.info(f"Message sent to chat_id {chat_id}")
-            return True
-        except TelegramError as e:
-            logger.error(f"Error sending message to Telegram: {e}", exc_info=True)
+                result = response.json()
+                if result.get('ok'):
+                    logger.info(f"Message sent to chat_id {chat_id}")
+                    return True
+                else:
+                    logger.warning(f"Telegram API returned not ok: {result}")
+                    # Fall through to retry without Markdown
+            except requests.RequestException as markdown_error:
+                logger.warning(f"Failed to send with Markdown: {markdown_error}")
+                # Fall through to retry without Markdown
+
+            # Retry without Markdown if first attempt failed
+            logger.info("Retrying without Markdown formatting...")
+            payload['parse_mode'] = None
+            del payload['parse_mode']
+
+            response = requests.post(url, json=payload, timeout=10)
+            response.raise_for_status()
+
+            result = response.json()
+            if result.get('ok'):
+                logger.info(f"Message sent to chat_id {chat_id} (plain text)")
+                return True
+            else:
+                logger.error(f"Failed to send message: {result}")
+                return False
+
+        except requests.RequestException as e:
+            logger.error(f"HTTP error sending message to Telegram: {e}", exc_info=True)
             return False
         except Exception as e:
             logger.error(f"Unexpected error sending message to Telegram: {e}", exc_info=True)
@@ -983,28 +1013,27 @@ class TelegramClient:
             return None
 
     def answer_callback_query(self, callback_query_id: str, text: str = None) -> bool:
-        """Answer a callback query from inline keyboard."""
+        """Answer a callback query from inline keyboard using synchronous HTTP."""
         try:
-            async def _answer():
-                await self.bot.answer_callback_query(callback_query_id=callback_query_id, text=text)
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
 
-            # Handle both new event loop and existing event loop scenarios
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, _answer())
-                        future.result(timeout=10)
-                else:
-                    loop.run_until_complete(_answer())
-            except RuntimeError:
-                asyncio.run(_answer())
+            payload = {'callback_query_id': callback_query_id}
+            if text:
+                payload['text'] = text
 
-            logger.info(f"Answered callback query {callback_query_id}")
-            return True
-        except TelegramError as e:
-            logger.error(f"Error answering callback query: {e}", exc_info=True)
+            response = requests.post(url, json=payload, timeout=10)
+            response.raise_for_status()
+
+            result = response.json()
+            if result.get('ok'):
+                logger.info(f"Answered callback query {callback_query_id}")
+                return True
+            else:
+                logger.error(f"Failed to answer callback query: {result}")
+                return False
+
+        except requests.RequestException as e:
+            logger.error(f"HTTP error answering callback query: {e}", exc_info=True)
             return False
         except Exception as e:
             logger.error(f"Unexpected error answering callback query: {e}", exc_info=True)
@@ -1371,16 +1400,24 @@ class TelegramWebhookHandler:
         """Send validation prompt with inline keyboard."""
         try:
             # Truncate notes if too long for Telegram message (4096 char limit)
-            max_length = 3500
+            # Leave room for header and footer
+            max_length = 3800
             preview = structured_notes[:max_length]
             if len(structured_notes) > max_length:
                 preview += "\n\n... (truncated for preview)"
 
-            message_text = f"📋 *Preview of structured notes for:* `{filename}`\n\n"
-            message_text += "━━━━━━━━━━━━━━━━━━━━\n\n"
-            message_text += preview
-            message_text += "\n\n━━━━━━━━━━━━━━━━━━━━\n"
-            message_text += "\n*Please validate this content:*"
+            # Send header message separately to avoid Markdown issues with user content
+            header = f"📋 Preview of structured notes for: {filename}\n"
+            header += "━" * 40 + "\n"
+            self.telegram_client.send_message(chat_id, header)
+
+            # Send the structured notes as plain text (no Markdown parsing of user content)
+            # This avoids issues with unescaped Markdown in generated notes
+            self.telegram_client.send_message(chat_id, preview)
+
+            # Send footer with validation request
+            footer = "━" * 40 + "\n"
+            footer += "Please validate this content:"
 
             # Create inline keyboard
             keyboard = [
@@ -1391,10 +1428,10 @@ class TelegramWebhookHandler:
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            self.telegram_client.send_message(chat_id, message_text, reply_markup=reply_markup)
+            self.telegram_client.send_message(chat_id, footer, reply_markup=reply_markup)
 
         except Exception as e:
-            logger.error(f"Error sending validation prompt: {e}")
+            logger.error(f"Error sending validation prompt: {e}", exc_info=True)
             raise
 
     def _handle_callback_query(self, callback_query: Dict[str, Any]) -> Dict[str, Any]:
