@@ -8,7 +8,7 @@ import os
 import sys
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 import base64
 from pathlib import Path
@@ -362,7 +362,7 @@ class FirestoreManager:
                 clarifications.append({
                     'question': question,
                     'answer': answer,
-                    'timestamp': datetime.now(datetime.timezone.utc).isoformat()
+                    'timestamp': datetime.now(timezone.utc).isoformat()
                 })
                 session_ref.update({
                     'clarifications': clarifications,
@@ -1193,7 +1193,7 @@ class TelegramWebhookHandler:
             message_text = message.get('text', '').strip()
 
             # Generate session ID using Telegram user_id
-            date_str = datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
+            date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
             session_id = f"telegram_{user_id}_{date_str}"
 
             logger.info(f"Processing message from user {username} (ID: {user_id}), chat_id: {chat_id}: {message_text}")
@@ -1422,7 +1422,7 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
             return h1_match.group(1).strip()
 
         # Fallback to date-based title
-        return f"Interview {datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+        return f"Interview {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
 
     def _generate_summary(self, session: Dict[str, Any], file_path: Optional[Path]) -> str:
         """Generate completion summary for user."""
@@ -1608,7 +1608,7 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
         try:
             file_id = voice['file_id']
             duration = voice.get('duration', 0)
-            filename = f"voice_recording_{datetime.now(datetime.timezone.utc).strftime('%Y%m%d_%H%M%S')}.ogg"
+            filename = f"voice_recording_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.ogg"
 
             self.telegram_client.send_message(chat_id, f'🎤 Processing voice recording ({duration}s)...')
 
