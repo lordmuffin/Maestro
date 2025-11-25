@@ -13,8 +13,6 @@ from typing import Dict, List, Any, Optional
 import base64
 from pathlib import Path
 
-# Add parent directory to path for backend imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from flask import Flask, request, jsonify, make_response
 import functions_framework
@@ -1339,6 +1337,45 @@ class TelegramWebhookHandler:
             self.telegram_client.send_message(chat_id, f'❌ Error creating PR: {str(e)}')
             return {'status': 'error'}
 
+    def _save_to_obsidian_drive(self, content: str, title: str, subfolder: str = "Interviews") -> Optional[str]:
+        """Save markdown notes to Obsidian folder in Google Drive."""
+        try:
+            if not OBSIDIAN_DRIVE_FOLDER_ID:
+                logger.warning("OBSIDIAN_DRIVE_FOLDER_ID not configured, cannot save to Obsidian")
+                return None
+
+            import re
+
+            # Sanitize title for filename (remove invalid characters)
+            title_clean = re.sub(r'[<>:"/\\|?*]', '', title or "Note").strip()
+
+            # Generate filename with date prefix
+            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            filename = f"{date_str} - {title_clean}.md"
+
+            # Add #Maestro tag if not present
+            if "#Maestro" not in content:
+                content = f"{content.rstrip()}\n\n#Maestro\n"
+
+            # Upload to Google Drive Obsidian folder
+            file_id = self.drive_client.upload_file(
+                folder_id=OBSIDIAN_DRIVE_FOLDER_ID,
+                filename=filename,
+                content=content,
+                mime_type='text/markdown'
+            )
+
+            if file_id:
+                logger.info(f"✅ Saved to Obsidian Drive: {filename} (ID: {file_id})")
+                return filename
+            else:
+                logger.error("Failed to upload to Google Drive")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error saving to Obsidian Drive: {e}", exc_info=True)
+            return None
+
     def _handle_interview_complete(self, session_id: str, chat_id: int) -> Dict[str, Any]:
         """Finalize interviewer session and save refined notes to Obsidian."""
         try:
@@ -1376,18 +1413,19 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
             # Extract title from the notes
             title = self._extract_title_from_markdown(final_notes)
 
-            # Save refined notes to Obsidian
+            # Save refined notes to Obsidian via Google Drive
             try:
-                from backend.core.rag.obsidian_writer import save_to_obsidian
-
-                new_file_path = save_to_obsidian(
+                new_file_name = self._save_to_obsidian_drive(
                     content=final_notes,
                     title=title,
-                    subfolder="Interviews",
-                    auto_tag=True
+                    subfolder="Interviews"
                 )
 
-                logger.info(f"Saved refined notes to Obsidian: {new_file_path}")
+                if new_file_name:
+                    logger.info(f"✅ Saved refined notes to Obsidian Drive: {new_file_name}")
+                    new_file_path = new_file_name  # Store filename instead of Path
+                else:
+                    raise Exception("Failed to upload to Obsidian Drive")
 
             except Exception as obsidian_error:
                 logger.error(f"Failed to save to Obsidian: {obsidian_error}")
@@ -1410,15 +1448,15 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
                     logger.error(f"Failed to tag source file: {tag_error}")
             else:
                 # Telegram upload - save raw version to Obsidian
-                if new_file_path:  # Only if Obsidian is accessible
+                if new_file_path:  # Only if Obsidian Drive is accessible
                     try:
-                        save_to_obsidian(
+                        raw_filename = self._save_to_obsidian_drive(
                             content=self._add_processed_tag(session['original_content']),
                             title=f"Raw - {title}",
-                            subfolder="Raw Uploads",
-                            auto_tag=False
+                            subfolder="Raw Uploads"
                         )
-                        logger.info("Saved raw transcript with #MaestroProcessed tag")
+                        if raw_filename:
+                            logger.info(f"✅ Saved raw transcript: {raw_filename}")
                     except Exception as raw_error:
                         logger.error(f"Failed to save raw transcript: {raw_error}")
 
@@ -1463,7 +1501,7 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
         # Fallback to date-based title
         return f"Interview {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
 
-    def _generate_summary(self, session: Dict[str, Any], file_path: Optional[Path]) -> str:
+    def _generate_summary(self, session: Dict[str, Any], file_path: Optional[str]) -> str:
         """Generate completion summary for user."""
         clarification_count = len(session.get('clarifications', []))
 
@@ -1471,8 +1509,8 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
 
         if file_path:
             summary += f"📝 *Refined Notes Saved*\n"
-            summary += f"   • File: `{file_path.name}`\n"
-            summary += f"   • Location: `{file_path.parent.name}/`\n\n"
+            summary += f"   • File: `{file_path}`\n"
+            summary += f"   • Location: Obsidian Google Drive\n\n"
         else:
             summary += "⚠️ *Notes finalized but not saved to Obsidian*\n\n"
 
