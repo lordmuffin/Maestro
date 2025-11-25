@@ -189,6 +189,7 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
       REPO_NAME                = var.repo_name
       GOOGLE_DRIVE_FOLDER_ID   = var.google_drive_folder_id
       OBSIDIAN_DRIVE_FOLDER_ID = var.obsidian_drive_folder_id
+      BEYOND_REPO_NAME         = var.beyond_repo_name
       DRIVE_POLL_INTERVAL      = tostring(var.drive_poll_interval)
       # Note: FUNCTION_URL is set via output after first deployment
       FUNCTION_URL = var.function_url != "" ? var.function_url : "https://${var.region}-${var.gcp_project}.cloudfunctions.net/${var.function_name}"

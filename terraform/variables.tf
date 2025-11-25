@@ -110,6 +110,12 @@ variable "obsidian_drive_folder_id" {
   default     = ""
 }
 
+variable "beyond_repo_name" {
+  description = "GitHub repository for interview notes in format 'username/repository'"
+  type        = string
+  default     = "lordmuffin/beyond"
+}
+
 variable "drive_poll_interval" {
   description = "Seconds between Drive folder checks (only used if webhooks fail)"
   type        = number
