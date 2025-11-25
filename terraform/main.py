@@ -1201,6 +1201,7 @@ class TelegramWebhookHandler:
         self.gemini = GeminiClient()
         self.github_manager = GitHubManager()
         self.telegram_client = TelegramClient()
+        self.drive_client = GoogleDriveClient()
 
     def handle(self, update_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process incoming Telegram webhook."""
