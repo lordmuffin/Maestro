@@ -139,6 +139,16 @@ data "archive_file" "function_source" {
     content  = file("${path.module}/../prompts/interrogation_questions_prompt.md")
     filename = "prompts/interrogation_questions_prompt.md"
   }
+
+  source {
+    content  = file("${path.module}/../prompts/interviewer_prompt.md")
+    filename = "prompts/interviewer_prompt.md"
+  }
+
+  source {
+    content  = file("${path.module}/../prompts/file_validation_prompt.md")
+    filename = "prompts/file_validation_prompt.md"
+  }
 }
 
 # Upload function source to GCS
