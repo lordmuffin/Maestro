@@ -782,15 +782,19 @@ class GeminiClient:
             return "I seem to be experiencing technical difficulties. How ironic for an Enterprise Architect bot."
 
     def analyze_multimodal(self, file_data: bytes, mime_type: str, filename: str) -> str:
-        """Analyze audio or image file."""
+        """Analyze audio, image, video, or PDF file."""
         try:
             # Create the appropriate Part based on file type
             if mime_type.startswith('image/'):
                 part = Part.from_data(data=file_data, mime_type=mime_type)
             elif mime_type.startswith('audio/'):
                 part = Part.from_data(data=file_data, mime_type=mime_type)
+            elif mime_type.startswith('video/'):
+                part = Part.from_data(data=file_data, mime_type=mime_type)
+            elif mime_type == 'application/pdf':
+                part = Part.from_data(data=file_data, mime_type=mime_type)
             else:
-                return f"Unsupported file type: {mime_type}"
+                return f"Unsupported file type: {mime_type}. Supported: image, audio, video, PDF"
 
             # Create prompt
             prompt_part = Part.from_text(f"{get_prompt('multimodal_analysis_prompt.md')}\n\nFile: {filename}")
@@ -1466,12 +1470,17 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
                 mime_type = document.get('mime_type', '')
                 filename = document.get('file_name', '')
 
-                # Support .txt and .md files
-                if (mime_type == 'text/plain' or mime_type == 'text/markdown' or
-                    filename.endswith('.txt') or filename.endswith('.md')):
-                    return self._process_text_file(session_id, chat_id, document)
+                # Support .txt, .md, and .pdf files
+                if (mime_type in ['text/plain', 'text/markdown', 'application/pdf'] or
+                    filename.endswith('.txt') or filename.endswith('.md') or filename.endswith('.pdf')):
+
+                    # Route to appropriate handler based on file type
+                    if mime_type == 'application/pdf' or filename.endswith('.pdf'):
+                        return self._process_pdf_file(session_id, chat_id, document)
+                    else:
+                        return self._process_text_file(session_id, chat_id, document)
                 else:
-                    self.telegram_client.send_message(chat_id, '❌ Only .txt and .md files are supported for documents.')
+                    self.telegram_client.send_message(chat_id, '❌ Only .txt, .md, and .pdf files are supported for documents.')
                     return {'status': 'error'}
             elif 'audio' in message or 'photo' in message:
                 # Redirect audio and photos to web UI (can be extended later)
@@ -1556,6 +1565,84 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
         except Exception as e:
             logger.error(f"Error processing text file: {e}", exc_info=True)
             self.telegram_client.send_message(chat_id, f'❌ Error processing text file: {str(e)}')
+            return {'status': 'error'}
+
+    def _process_pdf_file(self, session_id: str, chat_id: int, document: Dict[str, Any]) -> Dict[str, Any]:
+        """Process uploaded PDF document."""
+        try:
+            file_id = document['file_id']
+            filename = document.get('file_name', 'document.pdf')
+            file_size = document.get('file_size', 0)
+
+            # Gemini has a 15MB limit for PDFs
+            MAX_PDF_SIZE = 15 * 1024 * 1024  # 15 MB
+
+            logger.info(f"Processing PDF: {filename}, Size: {file_size}, FileID: {file_id}")
+
+            if file_size > MAX_PDF_SIZE:
+                self.telegram_client.send_message(
+                    chat_id,
+                    f'❌ PDF file too large.\n\nMaximum size: 15 MB\nYour file: {file_size / 1024 / 1024:.1f} MB\n\nPlease compress or split the PDF.'
+                )
+                return {'status': 'error'}
+
+            self.telegram_client.send_message(chat_id, f'📄 Processing PDF: *{filename}*...')
+
+            # Download PDF file
+            logger.info(f"Attempting to download PDF {file_id}")
+            try:
+                file_data = self.telegram_client.download_file(file_id)
+            except Exception as download_error:
+                logger.error(f"Exception during PDF download: {download_error}", exc_info=True)
+                self.telegram_client.send_message(
+                    chat_id,
+                    f'❌ Failed to download PDF.\n\nError: {str(download_error)}\n\nPlease try again or contact support.'
+                )
+                return {'status': 'error'}
+
+            if not file_data:
+                logger.error(f"PDF download returned None for file {file_id}")
+                self.telegram_client.send_message(
+                    chat_id,
+                    f'❌ Failed to download PDF.\n\nFile ID: `{file_id}`\nFilename: `{filename}`\n\nThe download returned empty. Please try again.'
+                )
+                return {'status': 'error'}
+
+            logger.info(f"Successfully downloaded {len(file_data)} bytes for {filename}")
+            self.telegram_client.send_message(chat_id, f'✅ Downloaded. Analyzing PDF with Gemini...')
+
+            # Analyze PDF with Gemini multimodal (extracts text, images, tables, charts)
+            analysis = self.gemini.analyze_multimodal(file_data, 'application/pdf', filename)
+
+            # Activate interviewer mode for PDF content refinement
+            FirestoreManager.create_interviewer_session(
+                session_id=session_id,
+                source_file_id=None,  # Telegram upload, no Drive source
+                source_file_path=None,
+                original_content=analysis
+            )
+
+            # Load interviewer prompt and analyze content
+            interviewer_prompt = get_prompt("interviewer_prompt.md")
+            initial_message = f"{interviewer_prompt}\n\n**PDF DOCUMENT ANALYSIS:**\n\n{analysis}"
+
+            # Generate initial clarifying questions
+            initial_questions = self.gemini.chat_response(initial_message, [])
+
+            # Save initial bot message to session history
+            FirestoreManager.save_message(session_id, 'assistant', initial_questions, str(chat_id))
+
+            # Send questions to user
+            self.telegram_client.send_message(
+                chat_id,
+                f"📝 *PDF Analysis Started*\n\n{initial_questions}\n\n_Type your answers or '/DONE' when ready to finalize._"
+            )
+
+            return {'status': 'ok'}
+
+        except Exception as e:
+            logger.error(f"Error processing PDF: {e}", exc_info=True)
+            self.telegram_client.send_message(chat_id, f'❌ Error processing PDF: {str(e)}')
             return {'status': 'error'}
 
     def _process_video_file(self, session_id: str, chat_id: int, video: Dict[str, Any]) -> Dict[str, Any]:
@@ -1949,8 +2036,17 @@ class UploadHandler:
         try:
             logger.info(f"Processing upload for session {session_id}: {filename} ({content_type})")
 
+            # Check file size for PDFs (15 MB limit for Gemini)
+            if content_type == 'application/pdf' and len(file_data) > 15 * 1024 * 1024:
+                return self._error_html('PDF too large. Maximum size is 15 MB.')
+
             # Analyze file with Gemini
-            analysis = self.gemini.analyze_multimodal(file_data, content_type, filename)
+            if content_type in ['application/pdf', 'audio/*', 'image/*', 'video/*'] or content_type.startswith(('audio/', 'image/', 'video/')):
+                analysis = self.gemini.analyze_multimodal(file_data, content_type, filename)
+            elif content_type == 'text/plain' or filename.endswith(('.txt', '.md')):
+                analysis = file_data.decode('utf-8')
+            else:
+                return self._error_html(f'Unsupported file type: {content_type}')
 
             # Save to Firestore
             FirestoreManager.save_message(
@@ -2126,7 +2222,7 @@ class DriveMonitorHandler:
                 return {'success': False, 'filename': filename, 'error': 'Download failed'}
 
             # Process based on file type
-            # Support text files (.txt and .md) and Google Docs
+            # Support text files (.txt and .md), Google Docs, and PDFs
             if (mime_type in ['text/plain', 'text/markdown', 'application/octet-stream',
                              'application/vnd.google-apps.document'] or
                 filename.endswith('.txt') or filename.endswith('.md')):
@@ -2135,6 +2231,13 @@ class DriveMonitorHandler:
                 except UnicodeDecodeError:
                     # Try alternate encoding
                     transcript = self.transcript_processor.process_text_transcript(file_data.decode('latin-1'))
+            elif mime_type == 'application/pdf' or filename.endswith('.pdf'):
+                # Check PDF size (15 MB limit for Gemini)
+                if len(file_data) > 15 * 1024 * 1024:
+                    return {'success': False, 'filename': filename, 'error': 'PDF too large (max 15 MB)'}
+                # Analyze PDF with Gemini multimodal
+                analysis = self.gemini.analyze_multimodal(file_data, 'application/pdf', filename)
+                transcript = self.transcript_processor.process_text_transcript(analysis)
             elif 'audio' in mime_type or filename.endswith('.m4a'):
                 transcript = self.transcript_processor.process_audio_transcript(file_data, filename)
             else:
@@ -2336,8 +2439,8 @@ def get_upload_ui_html(session_id: str) -> str:
                 <div class="upload-area" id="uploadArea">
                     <div class="file-icon">📁</div>
                     <div class="upload-text">Click to select or drag & drop</div>
-                    <div class="file-types">Audio, Image, or Text files</div>
-                    <input type="file" id="fileInput" name="file" accept="audio/*,image/*,text/plain,.txt,.md" required>
+                    <div class="file-types">Audio, Image, Text, or PDF files</div>
+                    <input type="file" id="fileInput" name="file" accept="audio/*,image/*,text/plain,.txt,.md,.pdf,application/pdf" required>
                 </div>
 
                 <div class="selected-file" id="selectedFile">
