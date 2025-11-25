@@ -13,6 +13,9 @@ from typing import Dict, List, Any, Optional
 import base64
 from pathlib import Path
 
+# Add parent directory to path for backend imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from flask import Flask, request, jsonify, make_response
 import functions_framework
 from google.cloud import firestore
