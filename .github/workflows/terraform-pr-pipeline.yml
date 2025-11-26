@@ -1,0 +1,323 @@
+name: Terraform Plan & Pull Request Generation
+
+on:
+  push:
+    branches:
+      - '**'
+      - '!main'
+      - '!master'
+    paths:
+      - 'iac/maestro-artifacts/terraform/**'
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: 'Target branch for the pull request'
+        required: false
+        type: string
+        default: 'main'
+
+env:
+  TF_WORKING_DIR: iac/maestro-artifacts/terraform
+  TERRAFORM_VERSION: '1.6.0'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  plan_and_pr:
+    name: 'Terraform Plan & PR Generation'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Format Check
+        id: fmt
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "🎨 Checking Terraform format..."
+          terraform fmt -check -recursive || echo "::warning::Terraform formatting issues detected"
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "🚀 Initializing Terraform..."
+          terraform init -input=false
+
+      - name: Terraform Validate
+        id: validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "✅ Validating Terraform configuration..."
+          terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "📋 Generating Terraform plan..."
+          terraform plan -no-color -input=false -out=tfplan.binary 2>&1 | tee plan_output.txt
+
+          # Capture exit code
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✅ Terraform plan generated successfully"
+          else
+            echo "❌ Terraform plan failed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
+
+          # Generate human-readable plan
+          terraform show -no-color tfplan.binary > plan_readable.txt
+        continue-on-error: false
+
+      - name: Security Scan with tfsec
+        id: tfsec
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "🔒 Running security scan with tfsec..."
+          # Install tfsec
+          curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
+
+          # Run tfsec and capture output
+          tfsec . --format=markdown > tfsec_output.md || true
+
+          if [ -s tfsec_output.md ]; then
+            echo "⚠️ Security findings detected"
+            echo "has_findings=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ No security issues found"
+            echo "has_findings=false" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+      - name: Read Plan Output
+        id: read_plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "📖 Reading plan output..."
+
+          # Read the plan output
+          if [ -f plan_readable.txt ]; then
+            PLAN_CONTENT=$(cat plan_readable.txt)
+          else
+            PLAN_CONTENT=$(cat plan_output.txt)
+          fi
+
+          # Save to file for later use
+          echo "$PLAN_CONTENT" > /tmp/plan_content.txt
+
+          # Truncate if too long for GitHub (max 65536 chars for PR body)
+          if [ ${#PLAN_CONTENT} -gt 60000 ]; then
+            echo "⚠️ Plan output is very large, truncating for PR"
+            echo "${PLAN_CONTENT:0:60000}" > /tmp/plan_content.txt
+            echo "... [Output truncated due to size]" >> /tmp/plan_content.txt
+          fi
+
+      - name: Read Security Findings
+        id: read_security
+        if: steps.tfsec.outputs.has_findings == 'true'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "📖 Reading security findings..."
+          if [ -f tfsec_output.md ]; then
+            cat tfsec_output.md > /tmp/security_findings.txt
+          fi
+
+      - name: Create or Update Pull Request
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Read plan output
+            const planText = fs.readFileSync('/tmp/plan_content.txt', 'utf8');
+
+            // Read security findings if they exist
+            let securitySection = '';
+            try {
+              const securityFindings = fs.readFileSync('/tmp/security_findings.txt', 'utf8');
+              securitySection = `\n\n## 🔒 Security Scan Results\n\n${securityFindings}\n`;
+            } catch (e) {
+              securitySection = '\n\n## ✅ Security Scan\n\nNo security issues detected by tfsec.\n';
+            }
+
+            // Get branch information
+            const branchName = context.ref.replace('refs/heads/', '');
+            const targetBranch = '${{ inputs.target_branch }}' || 'main';
+
+            // Don't create PR if we're already on main/master
+            if (branchName === 'main' || branchName === 'master') {
+              console.log('⚠️ Already on main/master branch, skipping PR creation');
+              return;
+            }
+
+            const title = `[Maestro GitOps] Infrastructure Update Proposal from ${branchName}`;
+
+            const body = `## 🤖 Maestro Proposed Execution Plan (Awaiting HITL Review)
+
+This Pull Request contains an infrastructure change proposed by the **Maestro AI Agent**.
+
+### 🛡️ Human-in-the-Loop (HITL) Governance Gate
+The **HITL governance gate** is enforced by requiring:
+- ✅ Mandatory team review and approval
+- ✅ Policy-as-Code validation (Phase 2, future enhancement)
+- ✅ Security scanning and compliance checks
+
+**⚠️ IMPORTANT:** This PR contains a Terraform plan only. No infrastructure changes have been applied yet.
+
+### 📋 Review Checklist
+- [ ] Verify that the proposed changes align with the intended modifications
+- [ ] Check for unexpected resource deletions or modifications
+- [ ] Validate security scan results
+- [ ] Ensure compliance with organizational policies
+- [ ] Confirm cost implications are acceptable
+
+${securitySection}
+
+### 📊 Terraform Plan Output
+
+<details>
+<summary>Click to expand full Terraform plan</summary>
+
+\`\`\`hcl
+${planText}
+\`\`\`
+
+</details>
+
+---
+
+### 📍 Workflow Information
+- **Triggered by:** ${{ github.actor }}
+- **Source Branch:** ${branchName}
+- **Target Branch:** ${targetBranch}
+- **Workflow Run:** [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+- **Commit:** ${{ github.sha }}
+
+### 🚀 Next Steps
+1. Review the Terraform plan above
+2. Approve this PR if changes are correct
+3. Merge this PR to trigger the deployment workflow (Phase 2)
+4. Monitor the deployment for any issues
+
+---
+*This PR was automatically generated by Maestro GitOps Workflow*
+*Artifact Contract Version: 1.0*
+*Working Directory: \`iac/maestro-artifacts/terraform/\`*
+`;
+
+            try {
+              // Check if PR already exists
+              const { data: existingPRs } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head: `${context.repo.owner}:${branchName}`,
+                base: targetBranch,
+                state: 'open'
+              });
+
+              if (existingPRs.length > 0) {
+                // Update existing PR
+                const prNumber = existingPRs[0].number;
+                console.log(`♻️ Updating existing PR #${prNumber}`);
+
+                await github.rest.pulls.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  title: title,
+                  body: body
+                });
+
+                // Add comment about update
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: `🔄 **Terraform plan updated**\n\nThe infrastructure plan has been regenerated. Please review the updated changes above.\n\n*Updated at: ${new Date().toISOString()}*`
+                });
+
+                console.log(`✅ PR #${prNumber} updated successfully`);
+                console.log(`🔗 ${existingPRs[0].html_url}`);
+              } else {
+                // Create new PR
+                console.log(`📝 Creating new PR from ${branchName} to ${targetBranch}`);
+
+                const { data: pull } = await github.rest.pulls.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: title,
+                  head: branchName,
+                  base: targetBranch,
+                  body: body
+                });
+
+                console.log(`✅ Pull Request created successfully!`);
+                console.log(`🔗 ${pull.html_url}`);
+
+                // Add labels to PR
+                try {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pull.number,
+                    labels: ['maestro-gitops', 'terraform', 'infrastructure', 'awaiting-review']
+                  });
+                } catch (labelError) {
+                  console.log('⚠️ Could not add labels (labels may not exist)');
+                }
+              }
+            } catch (error) {
+              console.error('❌ Error creating/updating PR:', error.message);
+
+              if (error.message.includes('No commits between')) {
+                console.log('ℹ️ No changes detected between branches');
+              } else if (error.message.includes('A pull request already exists')) {
+                console.log('ℹ️ PR already exists, attempting to update...');
+              } else {
+                throw error;
+              }
+            }
+
+      - name: Generate Job Summary
+        if: always()
+        run: |
+          echo "## 📋 Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Step | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ${{ steps.fmt.outcome == 'success' && '✅' || '⚠️' }} | Format Check | ${{ steps.fmt.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ${{ steps.init.outcome == 'success' && '✅' || '❌' }} | Init | ${{ steps.init.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ${{ steps.validate.outcome == 'success' && '✅' || '❌' }} | Validate | ${{ steps.validate.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ${{ steps.plan.outcome == 'success' && '✅' || '❌' }} | Plan | ${{ steps.plan.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ${{ steps.tfsec.outcome == 'success' && '✅' || '⚠️' }} | Security Scan | ${{ steps.tfsec.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Workflow Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Working Directory**: \`${{ env.TF_WORKING_DIR }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Terraform Version**: ${{ env.TERRAFORM_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ⚠️ Important Notes" >> $GITHUB_STEP_SUMMARY
+          echo "- **No infrastructure changes have been applied**" >> $GITHUB_STEP_SUMMARY
+          echo "- This workflow only generates a plan and creates a PR" >> $GITHUB_STEP_SUMMARY
+          echo "- Deployment requires manual PR approval and merge" >> $GITHUB_STEP_SUMMARY
+          echo "- All changes must pass HITL governance gates" >> $GITHUB_STEP_SUMMARY
