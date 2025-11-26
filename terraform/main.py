@@ -74,16 +74,15 @@ if not GCP_PROJECT:
     missing_vars.append('GCP_PROJECT')
 if not TELEGRAM_BOT_TOKEN:
     missing_vars.append('TELEGRAM_BOT_TOKEN')
-if not GITHUB_TOKEN:
-    missing_vars.append('GITHUB_TOKEN')
-if not REPO_NAME:
-    missing_vars.append('REPO_NAME')
+
+# Note: Repository configuration validation happens after GitHubConfigManager class is defined
+# See validate_repo_config() function below
 
 if missing_vars:
     logger.error(f"CRITICAL: Missing required environment variables: {', '.join(missing_vars)}")
     logger.error("Function may fail when these are accessed")
 else:
-    logger.info("All critical environment variables are set")
+    logger.info("Basic environment variables are set")
 
 # Lazy initialization globals
 _db_client = None
@@ -1158,58 +1157,216 @@ class GeminiClient:
             return f"Error analyzing file: {str(e)}"
 
 
-class GitHubManager:
-    """Handles GitHub operations for PR creation."""
+class RepositoryConfig:
+    """Data class for repository configuration."""
 
-    def __init__(self):
-        self._github = None
+    def __init__(self, name: str, label: str, token_env_var: str,
+                 description: str = "", paths: Dict[str, str] = None):
+        self.name = name  # "owner/repo"
+        self.label = label  # "maestro", "beyond"
+        self.token_env_var = token_env_var
+        self.description = description
+        self.paths = paths or {}
+        self._token = None
+        self._github_client = None
         self._repo = None
-        self._initialized = False
-
-    def _ensure_initialized(self):
-        """Lazy initialization of GitHub client to prevent cold start issues."""
-        if self._initialized:
-            return
-
-        if not GITHUB_TOKEN:
-            raise ValueError("GITHUB_TOKEN not configured")
-        if not REPO_NAME:
-            raise ValueError("REPO_NAME not configured")
-
-        try:
-            self._github = Github(GITHUB_TOKEN)
-            self._repo = self._github.get_repo(REPO_NAME)
-            self._initialized = True
-            logger.info(f"Initialized GitHub client for repo: {REPO_NAME}")
-        except Exception as e:
-            logger.error(f"Failed to initialize GitHub client: {e}")
-            raise
 
     @property
-    def repo(self):
-        """Lazy-loaded repository reference."""
-        self._ensure_initialized()
+    def token(self):
+        """Lazy-loaded GitHub token from environment."""
+        if self._token is None:
+            self._token = os.environ.get(self.token_env_var)
+            if not self._token:
+                raise ValueError(f"Token not found for {self.token_env_var}")
+        return self._token
+
+    def get_github_client(self):
+        """Lazy initialize GitHub client."""
+        if self._github_client is None:
+            self._github_client = Github(self.token)
+        return self._github_client
+
+    def get_repo(self):
+        """Lazy initialize repository object."""
+        if self._repo is None:
+            self._repo = self.get_github_client().get_repo(self.name)
         return self._repo
 
-    @property
-    def github(self):
-        """Lazy-loaded GitHub client."""
-        self._ensure_initialized()
-        return self._github
 
-    def create_pr_from_session(self, session_id: str, history: List[Dict[str, str]]) -> str:
-        """Create a branch, commit session content, and open PR."""
+class GitHubConfigManager:
+    """Manages repository configurations (Singleton)."""
+    _instance = None
+
+    def __init__(self, config_path: str = None):
+        if config_path is None:
+            config_path = os.path.join(os.path.dirname(__file__), 'repos.json')
+
+        self.config_path = config_path
+        self.config_data = None
+        self.repositories = {}  # label -> RepositoryConfig
+        self.routing_rules = {}
+        self.default_repo_label = None
+        self._load_config()
+
+    @classmethod
+    def get_instance(cls, config_path: str = None):
+        """Singleton pattern for config manager."""
+        if cls._instance is None:
+            cls._instance = cls(config_path)
+        return cls._instance
+
+    def _load_config(self):
+        """Load and validate configuration file."""
         try:
+            with open(self.config_path, 'r') as f:
+                if self.config_path.endswith('.json'):
+                    self.config_data = json.load(f)
+                elif self.config_path.endswith(('.yaml', '.yml')):
+                    import yaml
+                    self.config_data = yaml.safe_load(f)
+                else:
+                    raise ValueError(f"Unsupported config format: {self.config_path}")
+
+            self._validate_and_parse_config()
+            logger.info(f"Loaded configuration from {self.config_path}")
+            logger.info(f"Configured repositories: {list(self.repositories.keys())}")
+        except Exception as e:
+            logger.error(f"Failed to load repository configuration: {e}")
+            raise
+
+    def _validate_and_parse_config(self):
+        """Validate configuration and create repository objects."""
+        # Validate version
+        version = self.config_data.get('version')
+        if not version or not isinstance(version, str):
+            raise ValueError("Configuration must have 'version' field")
+
+        # Parse repositories
+        repos = self.config_data.get('repositories', [])
+        if not repos:
+            raise ValueError("Configuration must have at least one repository")
+
+        for repo_data in repos:
+            label = repo_data.get('label')
+            if not label:
+                raise ValueError("Each repository must have a 'label'")
+
+            repo_config = RepositoryConfig(
+                name=repo_data['name'],
+                label=label,
+                token_env_var=repo_data['token_env_var'],
+                description=repo_data.get('description', ''),
+                paths=repo_data.get('paths', {})
+            )
+            self.repositories[label] = repo_config
+
+        # Parse default repository
+        self.default_repo_label = self.config_data.get('default_repository')
+        if self.default_repo_label not in self.repositories:
+            raise ValueError(f"Default repository '{self.default_repo_label}' not found in repositories")
+
+        # Parse routing rules
+        self.routing_rules = self.config_data.get('routing_rules', {})
+        for rule_name, rule_config in self.routing_rules.items():
+            target = rule_config.get('default_target')
+            if target and target not in self.repositories:
+                raise ValueError(f"Routing rule '{rule_name}' targets unknown repository '{target}'")
+
+    def get_repo_config(self, label: str = None, name: str = None) -> RepositoryConfig:
+        """Get repository config by label or name."""
+        if label:
+            repo = self.repositories.get(label)
+            if not repo:
+                raise ValueError(f"Repository with label '{label}' not found")
+            return repo
+
+        if name:
+            for repo in self.repositories.values():
+                if repo.name == name:
+                    return repo
+            raise ValueError(f"Repository with name '{name}' not found")
+
+        # Return default
+        return self.repositories[self.default_repo_label]
+
+    def get_default_repo_for_operation(self, operation: str) -> RepositoryConfig:
+        """Get the default repository for a given operation type."""
+        rule = self.routing_rules.get(operation)
+        if rule and 'default_target' in rule:
+            return self.get_repo_config(label=rule['default_target'])
+        return self.get_repo_config()  # Fall back to default
+
+    def list_repositories(self) -> List[Dict[str, str]]:
+        """List all configured repositories with descriptions."""
+        return [
+            {
+                'label': label,
+                'name': config.name,
+                'description': config.description
+            }
+            for label, config in self.repositories.items()
+        ]
+
+
+class GitHubManager:
+    """Handles GitHub operations for PR creation across multiple repositories."""
+
+    def __init__(self, config_path: str = None):
+        self.config_manager = GitHubConfigManager.get_instance(config_path)
+        self._initialized = True
+        logger.info("GitHubManager initialized with multi-repo support")
+
+    def _get_repo_for_operation(self, operation: str,
+                                 repo_label: Optional[str] = None,
+                                 repo_name: Optional[str] = None) -> RepositoryConfig:
+        """
+        Determine which repository to use for an operation.
+
+        Priority:
+        1. Explicitly provided repo_label
+        2. Explicitly provided repo_name
+        3. Default from routing rules for operation
+        4. Global default repository
+        """
+        if repo_label or repo_name:
+            return self.config_manager.get_repo_config(label=repo_label, name=repo_name)
+
+        return self.config_manager.get_default_repo_for_operation(operation)
+
+    def create_pr_from_session(self,
+                               session_id: str,
+                               history: List[Dict[str, str]],
+                               repo_label: Optional[str] = None,
+                               repo_name: Optional[str] = None) -> str:
+        """
+        Create a branch, commit session content, and open PR.
+
+        Args:
+            session_id: Session identifier
+            history: Chat history
+            repo_label: Target repository label (e.g., 'maestro')
+            repo_name: Target repository name (e.g., 'owner/repo')
+
+        Returns:
+            PR URL
+        """
+        try:
+            # Determine target repository
+            repo_config = self._get_repo_for_operation('sessions', repo_label, repo_name)
+            repo = repo_config.get_repo()
+
+            logger.info(f"Creating session PR in repository: {repo_config.name}")
+
             # Generate branch name
             timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
             branch_name = f"session/{session_id.replace('@', '-').replace('.', '-')}-{timestamp}"
 
             # Get default branch
-            default_branch = self.repo.default_branch
-            source = self.repo.get_branch(default_branch)
+            default_branch = repo.default_branch
+            source = repo.get_branch(default_branch)
 
             # Create new branch
-            self.repo.create_git_ref(
+            repo.create_git_ref(
                 ref=f"refs/heads/{branch_name}",
                 sha=source.commit.sha
             )
@@ -1218,12 +1375,15 @@ class GitHubManager:
             # Format history as markdown
             markdown_content = self._format_history_as_markdown(session_id, history)
 
+            # Get path from config or use default
+            base_path = repo_config.paths.get('sessions', 'sessions/')
+
             # Create filename
             date_str = datetime.utcnow().strftime('%Y-%m-%d')
-            filename = f"sessions/{date_str}-{session_id.split('@')[0]}.md"
+            filename = f"{base_path}{date_str}-{session_id.split('@')[0]}.md"
 
             # Commit file
-            self.repo.create_file(
+            repo.create_file(
                 path=filename,
                 message=f"Add session content: {session_id}",
                 content=markdown_content,
@@ -1232,33 +1392,60 @@ class GitHubManager:
             logger.info(f"Committed file: {filename}")
 
             # Create PR
-            pr = self.repo.create_pull(
+            pr = repo.create_pull(
                 title=f"Session Content: {session_id}",
                 body=f"Automated PR containing content from interrogation session `{session_id}`.\n\nGenerated by V2V2B Interrogator.",
                 head=branch_name,
                 base=default_branch
             )
-            logger.info(f"Created PR: {pr.html_url}")
+            logger.info(f"Created PR in {repo_config.name}: {pr.html_url}")
 
             return pr.html_url
         except Exception as e:
-            logger.error(f"Error creating PR: {e}")
+            logger.error(f"Error creating session PR: {e}", exc_info=True)
             raise
 
-    def create_pr_from_transcript(self, filename: str, transcript: str, analysis: str, questions: str, metadata: Dict[str, Any]) -> str:
-        """Create a PR with transcript analysis and interrogation questions."""
+    def create_pr_from_transcript(self,
+                                  filename: str,
+                                  transcript: str,
+                                  analysis: str,
+                                  questions: str,
+                                  metadata: Dict[str, Any],
+                                  repo_label: Optional[str] = None,
+                                  repo_name: Optional[str] = None) -> str:
+        """
+        Create a PR with transcript analysis and interrogation questions.
+
+        Args:
+            filename: Original transcript filename
+            transcript: Transcript text
+            analysis: AI analysis of transcript
+            questions: Generated questions
+            metadata: File metadata
+            repo_label: Target repository label
+            repo_name: Target repository name
+
+        Returns:
+            PR URL
+        """
         try:
+            # Determine target repository
+            repo_config = self._get_repo_for_operation('transcripts', repo_label, repo_name)
+            repo = repo_config.get_repo()
+
+            logger.info(f"Creating transcript PR in repository: {repo_config.name}")
+
             # Generate branch name from filename and timestamp
             timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
             safe_filename = filename.replace('.', '-').replace(' ', '-')
             branch_name = f"transcript/{safe_filename}-{timestamp}"
 
             # Get default branch
-            default_branch = self.repo.default_branch
-            source = self.repo.get_branch(default_branch)
+            default_branch = repo.default_branch
+            source = repo.get_branch(default_branch)
 
             # Create new branch
-            self.repo.create_git_ref(
+            repo.create_git_ref(
                 ref=f"refs/heads/{branch_name}",
                 sha=source.commit.sha
             )
@@ -1267,13 +1454,16 @@ class GitHubManager:
             # Format as markdown
             markdown_content = self._format_transcript_as_markdown(filename, transcript, analysis, questions, metadata)
 
+            # Get path from config or use default
+            base_path = repo_config.paths.get('transcripts', 'transcripts/')
+
             # Create filename for transcripts directory
             date_str = datetime.now().strftime('%Y-%m-%d')
             base_name = filename.rsplit('.', 1)[0]
-            file_path = f"transcripts/{date_str}-{base_name}.md"
+            file_path = f"{base_path}{date_str}-{base_name}.md"
 
             # Commit file
-            self.repo.create_file(
+            repo.create_file(
                 path=file_path,
                 message=f"Add transcript analysis: {filename}",
                 content=markdown_content,
@@ -1303,17 +1493,17 @@ class GitHubManager:
 🤖 Generated by V2V2B Interrogator
 """
 
-            pr = self.repo.create_pull(
+            pr = repo.create_pull(
                 title=f"📋 Transcript Analysis: {filename}",
                 body=pr_body,
                 head=branch_name,
                 base=default_branch
             )
-            logger.info(f"Created PR: {pr.html_url}")
+            logger.info(f"Created PR in {repo_config.name}: {pr.html_url}")
 
             return pr.html_url
         except Exception as e:
-            logger.error(f"Error creating transcript PR: {e}")
+            logger.error(f"Error creating transcript PR: {e}", exc_info=True)
             raise
 
     def _format_transcript_as_markdown(self, filename: str, transcript: str, analysis: str, questions: str, metadata: Dict[str, Any]) -> str:
@@ -1362,40 +1552,36 @@ class GitHubManager:
 
         return "\n".join(lines)
 
-    def create_pr_from_interview(
-        self,
-        title: str,
-        content: str,
-        session_id: str,
-        repo_name: Optional[str] = None,
-        target_path: str = "05_Maestro_Notes/"
-    ) -> str:
-        """Create a PR in specified repo with interview notes.
+    def create_pr_from_interview(self,
+                                 title: str,
+                                 content: str,
+                                 session_id: str,
+                                 repo_label: Optional[str] = None,
+                                 repo_name: Optional[str] = None,
+                                 target_path: Optional[str] = None) -> str:
+        """
+        Create a PR in specified repo with interview notes.
 
         Args:
             title: Title for the interview notes
             content: Full markdown content with frontmatter
             session_id: Unique session identifier
-            repo_name: Target repository (defaults to BEYOND_REPO_NAME)
-            target_path: Directory path within repo (default: 05_Maestro_Notes/)
+            repo_label: Target repository label (e.g., 'beyond')
+            repo_name: Target repository name (e.g., 'owner/repo')
+            target_path: Directory path within repo (optional, uses config default)
 
         Returns:
-            PR URL if successful
+            PR URL
 
         Raises:
             Exception if PR creation fails
         """
         try:
-            # Use custom repo or fall back to BEYOND_REPO_NAME
-            target_repo = repo_name or BEYOND_REPO_NAME
+            # Determine target repository
+            repo_config = self._get_repo_for_operation('interviews', repo_label, repo_name)
+            repo = repo_config.get_repo()
 
-            if not target_repo:
-                raise ValueError("No target repository specified")
-
-            # Initialize GitHub client
-            self._ensure_initialized()
-            github = Github(GITHUB_TOKEN)
-            repo = github.get_repo(target_repo)
+            logger.info(f"Creating interview PR in repository: {repo_config.name}")
 
             # Generate branch name
             timestamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
@@ -1409,6 +1595,10 @@ class GitHubManager:
                 ref=f"refs/heads/{branch_name}",
                 sha=source.commit.sha
             )
+
+            # Determine target path
+            if target_path is None:
+                target_path = repo_config.paths.get('interviews', '05_Maestro_Notes/')
 
             # Create filename with date prefix
             date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -1442,12 +1632,45 @@ New structured interview notes generated by Maestro's AI interviewer.
                 base=default_branch
             )
 
-            logger.info(f"Created PR in {target_repo}: {pr.html_url}")
+            logger.info(f"Created PR in {repo_config.name}: {pr.html_url}")
             return pr.html_url
 
         except Exception as e:
             logger.error(f"Failed to create interview PR: {e}", exc_info=True)
             raise
+
+
+def validate_repo_config():
+    """Validate repository configuration and tokens."""
+    missing_vars = []
+    try:
+        config_manager = GitHubConfigManager.get_instance()
+
+        # Validate each repository has its token
+        token_vars = set()
+        for label, repo_config in config_manager.repositories.items():
+            # Check for unique token env var names
+            if repo_config.token_env_var in token_vars:
+                logger.warning(f"Duplicate token_env_var '{repo_config.token_env_var}' found - this is allowed but not recommended")
+            token_vars.add(repo_config.token_env_var)
+
+            # Validate token exists
+            token = os.environ.get(repo_config.token_env_var)
+            if not token:
+                missing_vars.append(f"{repo_config.token_env_var} (for {label})")
+
+        if missing_vars:
+            logger.error(f"CRITICAL: Missing repository tokens: {', '.join(missing_vars)}")
+            logger.error("PR creation will fail for repositories with missing tokens")
+        else:
+            logger.info("All repository tokens are configured")
+
+    except Exception as e:
+        logger.error(f"Failed to validate repository configuration: {e}")
+
+
+# Validate repository configuration now that classes are defined
+validate_repo_config()
 
 
 class TelegramClient:
@@ -1906,8 +2129,8 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
                     title=title,
                     content=final_notes,
                     session_id=session_id,
-                    repo_name=BEYOND_REPO_NAME,
-                    target_path="05_Maestro_Notes/"
+                    repo_label='beyond',
+                    target_path=None  # Let config determine the path
                 )
 
                 logger.info(f"✅ Created PR in beyond repo: {pr_url}")
@@ -3220,7 +3443,59 @@ def entry_point(request):
             result = handler.scan_and_process_new_files()
             return jsonify_with_cors(result, 200)
 
-        # Route F: Health Check (GET /)
+        # Route F: Repository Health Check (GET /health/repos or GET /?mode=health_repos)
+        elif request.method == 'GET' and (path == '/health/repos' or mode == 'health_repos'):
+            logger.info(f"[{request_id}] Repository health check requested")
+            try:
+                config_manager = GitHubConfigManager.get_instance()
+
+                results = {
+                    'status': 'healthy',
+                    'config_version': config_manager.config_data.get('version'),
+                    'default_repository': config_manager.default_repo_label,
+                    'repositories': []
+                }
+
+                for label, repo_config in config_manager.repositories.items():
+                    repo_status = {
+                        'label': label,
+                        'name': repo_config.name,
+                        'token_env_var': repo_config.token_env_var,
+                        'token_available': bool(os.environ.get(repo_config.token_env_var)),
+                        'accessible': False,
+                        'error': None
+                    }
+
+                    # Test repository access
+                    try:
+                        repo = repo_config.get_repo()
+                        _ = repo.default_branch  # Simple read operation
+                        repo_status['accessible'] = True
+                    except Exception as e:
+                        repo_status['error'] = str(e)
+                        results['status'] = 'degraded'
+                        logger.error(f"Repository {label} not accessible: {e}")
+
+                    results['repositories'].append(repo_status)
+
+                # Determine HTTP status code
+                if results['status'] == 'healthy':
+                    status_code = 200
+                elif results['status'] == 'degraded':
+                    status_code = 503  # Service Unavailable (partial functionality)
+                else:
+                    status_code = 500
+
+                return jsonify_with_cors(results, status_code)
+
+            except Exception as e:
+                logger.error(f"Health check failed: {e}", exc_info=True)
+                return jsonify_with_cors({
+                    'status': 'unhealthy',
+                    'error': str(e)
+                }, 503)
+
+        # Route G: Health Check (GET /)
         elif request.method == 'GET' and not mode:
             logger.info(f"[{request_id}] Health check requested")
 

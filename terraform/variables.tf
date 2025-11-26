@@ -15,21 +15,27 @@ variable "function_name" {
   default     = "v2v2b-interrogator"
 }
 
-variable "github_token" {
-  description = "GitHub Personal Access Token for repository operations"
-  type        = string
+variable "github_tokens" {
+  description = "Map of GitHub tokens for each repository (key: repo label, value: token)"
+  type        = map(string)
   sensitive   = true
+
+  validation {
+    condition     = length(var.github_tokens) > 0
+    error_message = "At least one GitHub token must be provided"
+  }
+}
+
+variable "repos_config_file" {
+  description = "Path to repository configuration file (JSON or YAML)"
+  type        = string
+  default     = "repos.json"
 }
 
 variable "telegram_bot_token" {
   description = "Telegram Bot Token obtained from @BotFather"
   type        = string
   sensitive   = true
-}
-
-variable "repo_name" {
-  description = "GitHub repository in format 'username/repository'"
-  type        = string
 }
 
 variable "function_url" {
@@ -108,12 +114,6 @@ variable "obsidian_drive_folder_id" {
   description = "Google Drive folder ID for Obsidian vault (where summaries are synced)"
   type        = string
   default     = ""
-}
-
-variable "beyond_repo_name" {
-  description = "GitHub repository for interview notes in format 'username/repository'"
-  type        = string
-  default     = "lordmuffin/beyond"
 }
 
 variable "kanban_folder_id" {

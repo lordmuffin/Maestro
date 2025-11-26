@@ -31,15 +31,15 @@ env:
   TERRAFORM_STATE_BUCKET: ${{ vars.TERRAFORM_STATE_BUCKET }}
   # Terraform variables - centralized configuration
   TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
-  TF_VAR_github_token: ${{ secrets.GH_TOKEN }}
   TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-  TF_VAR_repo_name: ${{ vars.REPO_NAME || 'lordmuffin/Maestro' }}
   TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
   TF_VAR_obsidian_drive_folder_id: ${{ vars.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
   TF_VAR_kanban_folder_id: ${{ vars.KANBAN_FOLDER_ID || '' }}
-  TF_VAR_beyond_repo_name: ${{ vars.BEYOND_REPO_NAME || 'lordmuffin/beyond' }}
   TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
   TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
+  # Multi-repository GitHub tokens
+  TF_VAR_github_tokens: '{"maestro":"${{ secrets.GH_TOKEN_MAESTRO }}","beyond":"${{ secrets.GH_TOKEN_BEYOND }}"}'
+  TF_VAR_repos_config_file: 'repos.json'
 
 permissions:
   contents: read
@@ -139,8 +139,12 @@ jobs:
             echo "::error::GCP_PROJECT_ID secret is not set. Please configure it in Settings -> Secrets -> GCP_PROJECT_ID"
             exit 1
           fi
-          if [ -z "${{ env.TF_VAR_github_token }}" ]; then
-            echo "::error::GH_TOKEN secret is not set. Please configure it in Settings -> Secrets -> GH_TOKEN"
+          if [ -z "${{ secrets.GH_TOKEN_MAESTRO }}" ]; then
+            echo "::error::GH_TOKEN_MAESTRO secret is not set. Please configure it in Settings -> Secrets -> GH_TOKEN_MAESTRO"
+            exit 1
+          fi
+          if [ -z "${{ secrets.GH_TOKEN_BEYOND }}" ]; then
+            echo "::error::GH_TOKEN_BEYOND secret is not set. Please configure it in Settings -> Secrets -> GH_TOKEN_BEYOND"
             exit 1
           fi
           if [ -z "${{ env.TF_VAR_telegram_bot_token }}" ]; then
@@ -149,7 +153,7 @@ jobs:
           fi
           echo "✅ All required configuration is set"
           echo "Project: ${{ env.TF_VAR_gcp_project }}"
-          echo "Repo: ${{ env.TF_VAR_repo_name }}"
+          echo "Repository Config: repos.json (maestro, beyond)"
           echo "Telegram Bot: configured ✓"
           echo "Drive Folder ID: ${{ env.TF_VAR_google_drive_folder_id != '' && 'configured' || 'not set (optional)' }}"
           echo "Obsidian Folder ID: ${{ env.TF_VAR_obsidian_drive_folder_id != '' && 'configured' || 'not set (optional)' }}"

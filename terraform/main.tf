@@ -149,6 +149,12 @@ data "archive_file" "function_source" {
     content  = file("${path.module}/../prompts/file_validation_prompt.md")
     filename = "prompts/file_validation_prompt.md"
   }
+
+  # Include repository configuration file
+  source {
+    content  = file("${path.module}/${var.repos_config_file}")
+    filename = "repos.json"
+  }
 }
 
 # Upload function source to GCS
@@ -182,19 +188,23 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
     available_memory   = var.memory
     timeout_seconds    = var.timeout_seconds
 
-    environment_variables = {
-      GCP_PROJECT              = var.gcp_project
-      GITHUB_TOKEN             = var.github_token
-      TELEGRAM_BOT_TOKEN       = var.telegram_bot_token
-      REPO_NAME                = var.repo_name
-      GOOGLE_DRIVE_FOLDER_ID   = var.google_drive_folder_id
-      OBSIDIAN_DRIVE_FOLDER_ID = var.obsidian_drive_folder_id
-      KANBAN_FOLDER_ID         = var.kanban_folder_id
-      BEYOND_REPO_NAME         = var.beyond_repo_name
-      DRIVE_POLL_INTERVAL      = tostring(var.drive_poll_interval)
-      # Note: FUNCTION_URL is set via output after first deployment
-      FUNCTION_URL = var.function_url != "" ? var.function_url : "https://${var.region}-${var.gcp_project}.cloudfunctions.net/${var.function_name}"
-    }
+    environment_variables = merge(
+      {
+        GCP_PROJECT              = var.gcp_project
+        TELEGRAM_BOT_TOKEN       = var.telegram_bot_token
+        GOOGLE_DRIVE_FOLDER_ID   = var.google_drive_folder_id
+        OBSIDIAN_DRIVE_FOLDER_ID = var.obsidian_drive_folder_id
+        KANBAN_FOLDER_ID         = var.kanban_folder_id
+        DRIVE_POLL_INTERVAL      = tostring(var.drive_poll_interval)
+        # Note: FUNCTION_URL is set via output after first deployment
+        FUNCTION_URL = var.function_url != "" ? var.function_url : "https://${var.region}-${var.gcp_project}.cloudfunctions.net/${var.function_name}"
+      },
+      # Add per-repository GitHub tokens
+      {
+        for label, token in var.github_tokens :
+        "GITHUB_TOKEN_${upper(label)}" => token
+      }
+    )
 
     ingress_settings               = "ALLOW_ALL"
     all_traffic_on_latest_revision = true

@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "default_repository": "maestro",
+  "repositories": [
+    {
+      "name": "lordmuffin/Maestro",
+      "label": "maestro",
+      "token_env_var": "GITHUB_TOKEN_MAESTRO",
+      "description": "Main Maestro repository for sessions and transcripts",
+      "paths": {
+        "sessions": "sessions/",
+        "transcripts": "transcripts/"
+      }
+    },
+    {
+      "name": "lordmuffin/beyond",
+      "label": "beyond",
+      "token_env_var": "GITHUB_TOKEN_BEYOND",
+      "description": "Interview notes and personal knowledge base",
+      "paths": {
+        "interviews": "05_Maestro_Notes/",
+        "notes": "notes/"
+      }
+    }
+  ],
+  "routing_rules": {
+    "sessions": {
+      "default_target": "maestro",
+      "method": "create_pr_from_session"
+    },
+    "transcripts": {
+      "default_target": "maestro",
+      "method": "create_pr_from_transcript"
+    },
+    "interviews": {
+      "default_target": "beyond",
+      "method": "create_pr_from_interview"
+    }
+  }
+}

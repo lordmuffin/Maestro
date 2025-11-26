@@ -10,8 +10,15 @@ gcp_project = "your-project-id"
 region      = "us-central1"
 
 # GitHub Integration (Required)
-github_token = "ghp_your_github_personal_access_token_here"  # Get from: https://github.com/settings/tokens
-repo_name    = "your-username/your-repository"
+# Map of repository labels to GitHub tokens
+# Labels must match those defined in repos.json
+github_tokens = {
+  maestro = "ghp_your_maestro_token_here"  # Get from: https://github.com/settings/tokens
+  beyond  = "ghp_your_beyond_token_here"   # Can be same token as maestro
+}
+
+# Repository configuration file (relative to terraform directory)
+repos_config_file = "repos.json"
 
 # ========================================
 # Google Drive Integration (Optional)
