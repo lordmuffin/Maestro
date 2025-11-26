@@ -38,7 +38,8 @@
       "Bash(kubectl delete:*)",
       "Bash(terraform fmt:*)",
       "Bash(find:*)",
-      "Bash(gh secret list:*)"
+      "Bash(gh secret list:*)",
+      "Bash(git log:*)"
     ],
     "deny": [],
     "ask": []

@@ -1698,8 +1698,63 @@ class TelegramClient:
             escaped_text = escaped_text.replace(char, f'\\{char}')
         return escaped_text
 
+    @staticmethod
+    def _sanitize_message(text: str, max_length: int = 4096) -> str:
+        """Truncate message to Telegram's character limit."""
+        if not text:
+            return ""
+        if len(text) > max_length:
+            text = text[:max_length - 25]
+            text += "\n\n... (message truncated)"
+        return text
+
+    @staticmethod
+    def _prepare_message(text: str, parse_mode: Optional[str] = 'Markdown',
+                         max_length: int = 4096) -> tuple:
+        """Prepare message with automatic escaping and length validation.
+
+        Returns: (safe_text, safe_parse_mode)
+        """
+        if not text:
+            return ("", None)
+
+        # Always truncate first
+        safe_text = TelegramClient._sanitize_message(text, max_length)
+
+        # Handle parse mode
+        if parse_mode is None:
+            return (safe_text, None)
+
+        if parse_mode == 'Markdown':
+            try:
+                escaped = TelegramClient._escape_markdown(safe_text)
+                return (escaped, 'Markdown')
+            except Exception as e:
+                logger.warning(f"Markdown escaping failed: {e}")
+                return (safe_text, None)
+
+        return (safe_text, parse_mode)
+
+    def safe_send_error(self, chat_id: int, error: Exception, context: str = "") -> bool:
+        """Safely send error message - always plain text."""
+        error_text = str(error)
+        message = f"❌ Error {context}:\n{error_text}" if context else f"❌ Error: {error_text}"
+        safe_text, _ = TelegramClient._prepare_message(message, parse_mode=None, max_length=2000)
+        return self.send_message(chat_id, safe_text, parse_mode=None)
+
+    def safe_send_ai_content(self, chat_id: int, ai_text: str,
+                             context: str = "AI Response", max_length: int = 3800) -> bool:
+        """Safely send AI-generated content - always plain text."""
+        if not ai_text:
+            logger.warning(f"Empty {context} content to send")
+            return True
+        safe_text, _ = TelegramClient._prepare_message(ai_text, parse_mode=None, max_length=max_length)
+        if len(ai_text) > max_length:
+            logger.info(f"Truncated {context}: {len(ai_text)} -> {max_length} chars")
+        return self.send_message(chat_id, safe_text, parse_mode=None)
+
     def send_message(self, chat_id: int, text: str, reply_markup=None, parse_mode: str = 'Markdown') -> bool:
-        """Send a message to a Telegram chat using synchronous HTTP.
+        """Send a message to a Telegram chat using synchronous HTTP with safety checks.
 
         Args:
             chat_id: Telegram chat ID
@@ -1708,50 +1763,59 @@ class TelegramClient:
             parse_mode: 'Markdown', 'HTML', or None (default: 'Markdown')
         """
         try:
+            # Prepare message with all safety checks upfront
+            safe_text, safe_parse_mode = TelegramClient._prepare_message(
+                text, parse_mode, max_length=4096
+            )
+
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
             # Prepare payload
             payload = {
                 'chat_id': chat_id,
-                'text': text,
-                'parse_mode': parse_mode
+                'text': safe_text
             }
+
+            if safe_parse_mode:
+                payload['parse_mode'] = safe_parse_mode
 
             # Add reply markup if provided (for inline keyboards)
             if reply_markup:
                 payload['reply_markup'] = reply_markup.to_json()
 
-            # Try sending with Markdown first
+            # Attempt send with prepared mode
             try:
                 response = requests.post(url, json=payload, timeout=10)
                 response.raise_for_status()
 
                 result = response.json()
                 if result.get('ok'):
-                    logger.info(f"Message sent to chat_id {chat_id}")
+                    logger.info(f"Message sent to chat_id {chat_id} (mode: {safe_parse_mode or 'plain'})")
                     return True
                 else:
                     logger.warning(f"Telegram API returned not ok: {result}")
-                    # Fall through to retry without Markdown
+                    # Fall through to retry without parse_mode
             except requests.RequestException as markdown_error:
-                logger.warning(f"Failed to send with Markdown: {markdown_error}")
-                # Fall through to retry without Markdown
+                logger.warning(f"Failed to send with parse_mode={safe_parse_mode}: {markdown_error}")
+                # Fall through to retry without parse_mode
 
-            # Retry without Markdown if first attempt failed
-            logger.info("Retrying without Markdown formatting...")
-            payload['parse_mode'] = None
-            del payload['parse_mode']
+            # Retry without parse_mode if first attempt failed and we had one
+            if safe_parse_mode:
+                logger.info("Retrying without parse_mode...")
+                payload.pop('parse_mode', None)
 
-            response = requests.post(url, json=payload, timeout=10)
-            response.raise_for_status()
+                response = requests.post(url, json=payload, timeout=10)
+                response.raise_for_status()
 
-            result = response.json()
-            if result.get('ok'):
-                logger.info(f"Message sent to chat_id {chat_id} (plain text)")
-                return True
-            else:
-                logger.error(f"Failed to send message: {result}")
-                return False
+                result = response.json()
+                if result.get('ok'):
+                    logger.info(f"Message sent to chat_id {chat_id} (plain text fallback)")
+                    return True
+                else:
+                    logger.error(f"Failed to send message: {result}")
+                    return False
+
+            return False
 
         except requests.RequestException as e:
             logger.error(f"HTTP error sending message to Telegram: {e}", exc_info=True)
@@ -1970,7 +2034,7 @@ class TelegramWebhookHandler:
             return {'status': 'ok'}
         except Exception as e:
             logger.error(f"Error handling /done request: {e}")
-            self.telegram_client.send_message(chat_id, f'❌ Error creating PR: {str(e)}')
+            self.telegram_client.safe_send_error(chat_id, e, context="creating PR")
             return {'status': 'error'}
 
     def _save_to_obsidian_drive(self, content: str, title: str, subfolder: str = "Interviews") -> Optional[str]:
@@ -2065,10 +2129,8 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
 
             except Exception as obsidian_error:
                 logger.error(f"Failed to save to Obsidian: {obsidian_error}")
-                self.telegram_client.send_message(
-                    chat_id,
-                    f'⚠️ Notes finalized but failed to save to Obsidian:\n{str(obsidian_error)}\n\nNotes are saved in session history.'
-                )
+                self.telegram_client.safe_send_error(chat_id, obsidian_error, context="saving notes to Obsidian")
+                self.telegram_client.send_message(chat_id, "⚠️ Notes are saved in session history.", parse_mode=None)
                 new_file_path = None
 
             # Tag source document with #MaestroProcessed
@@ -2165,7 +2227,7 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
 
         except Exception as e:
             logger.error(f"Error completing interview: {e}", exc_info=True)
-            self.telegram_client.send_message(chat_id, f'❌ Error finalizing notes: {str(e)}')
+            self.telegram_client.safe_send_error(chat_id, e, context="finalizing interview")
             return {'status': 'error'}
 
     def _add_processed_tag(self, content: str) -> str:
@@ -2300,7 +2362,8 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
             file_size = document.get('file_size', 0)
 
             logger.info(f"Processing text file: {filename}, MIME: {mime_type}, Size: {file_size}, FileID: {file_id}")
-            self.telegram_client.send_message(chat_id, f'📄 Processing text file: *{filename}*...')
+            clean_filename = filename[:100]  # Truncate long names
+            self.telegram_client.send_message(chat_id, f'📄 Processing text file: {clean_filename}...', parse_mode=None)
 
             # Download file
             logger.info(f"Attempting to download file {file_id}")
@@ -2308,17 +2371,16 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
                 file_data = self.telegram_client.download_file(file_id)
             except Exception as download_error:
                 logger.error(f"Exception during download: {download_error}", exc_info=True)
-                self.telegram_client.send_message(
-                    chat_id,
-                    f'❌ Failed to download file.\n\nError: {str(download_error)}\n\nPlease contact support.'
-                )
+                self.telegram_client.safe_send_error(chat_id, download_error, context="downloading file")
+                self.telegram_client.send_message(chat_id, "Please contact support.", parse_mode=None)
                 return {'status': 'error'}
 
             if not file_data:
                 logger.error(f"Download returned None for file {file_id}")
                 self.telegram_client.send_message(
                     chat_id,
-                    f'❌ Failed to download file.\n\nFile ID: `{file_id}`\nFilename: `{filename}`\n\nThe download returned empty. Please try again or contact support.'
+                    f'❌ Failed to download file.\n\nFile ID: {file_id}\nFilename: {clean_filename}\n\nThe download returned empty. Please try again or contact support.',
+                    parse_mode=None
                 )
                 return {'status': 'error'}
 
@@ -2350,10 +2412,9 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
             FirestoreManager.save_message(session_id, 'assistant', initial_questions, str(chat_id))
 
             # Send questions to user
-            self.telegram_client.send_message(
-                chat_id,
-                f"📝 *Transcript Analysis Started*\n\n{initial_questions}\n\n_Type your answers or '/DONE' when ready to finalize._"
-            )
+            self.telegram_client.send_message(chat_id, "📝 Transcript Analysis Started\n", parse_mode=None)
+            self.telegram_client.safe_send_ai_content(chat_id, initial_questions, context="Interview Questions")
+            self.telegram_client.send_message(chat_id, "Type your answers or '/DONE' when ready to finalize.", parse_mode=None)
 
             return {'status': 'ok'}
 
@@ -2428,10 +2489,9 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
             FirestoreManager.save_message(session_id, 'assistant', initial_questions, str(chat_id))
 
             # Send questions to user
-            self.telegram_client.send_message(
-                chat_id,
-                f"📝 *PDF Analysis Started*\n\n{initial_questions}\n\n_Type your answers or '/DONE' when ready to finalize._"
-            )
+            self.telegram_client.send_message(chat_id, "📝 PDF Analysis Started\n", parse_mode=None)
+            self.telegram_client.safe_send_ai_content(chat_id, initial_questions, context="PDF Interview Questions")
+            self.telegram_client.send_message(chat_id, "Type your answers or '/DONE' when ready to finalize.", parse_mode=None)
 
             return {'status': 'ok'}
 
@@ -2522,16 +2582,15 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
             FirestoreManager.save_message(session_id, 'assistant', initial_questions, str(chat_id))
 
             # Send questions to user
-            self.telegram_client.send_message(
-                chat_id,
-                f"📝 *Voice Transcript Analysis Started*\n\n{initial_questions}\n\n_Type your answers or '/DONE' when ready to finalize._"
-            )
+            self.telegram_client.send_message(chat_id, "📝 Voice Transcript Analysis Started\n", parse_mode=None)
+            self.telegram_client.safe_send_ai_content(chat_id, initial_questions, context="Voice Interview Questions")
+            self.telegram_client.send_message(chat_id, "Type your answers or '/DONE' when ready to finalize.", parse_mode=None)
 
             return {'status': 'ok'}
 
         except Exception as e:
             logger.error(f"Error processing voice recording: {e}", exc_info=True)
-            self.telegram_client.send_message(chat_id, f'❌ Error processing voice: {str(e)}')
+            self.telegram_client.safe_send_error(chat_id, e, context="processing voice recording")
             return {'status': 'error'}
 
     def _generate_structured_notes(self, content: str, filename: str, file_type: str) -> str:
@@ -2572,7 +2631,7 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
 
             # Send the structured notes as plain text (no Markdown parsing of user content)
             # This avoids issues with unescaped Markdown in generated notes
-            self.telegram_client.send_message(chat_id, preview)
+            self.telegram_client.send_message(chat_id, preview, parse_mode=None)
 
             # Send footer with validation request
             footer = "━" * 40 + "\n"
@@ -2809,13 +2868,13 @@ Continue the interview process. Ask follow-up clarifying questions if needed, or
             # Save bot response
             FirestoreManager.save_message(session_id, 'assistant', bot_response, str(chat_id))
 
-            # Send response via Telegram
-            self.telegram_client.send_message(chat_id, bot_response)
+            # Send response via Telegram (AI content - use safe method)
+            self.telegram_client.safe_send_ai_content(chat_id, bot_response, context="Chat Response", max_length=3800)
 
             return {'status': 'ok'}
         except Exception as e:
             logger.error(f"Error handling chat message: {e}")
-            self.telegram_client.send_message(chat_id, '❌ Sorry, I encountered an error processing your message.')
+            self.telegram_client.send_message(chat_id, '❌ Sorry, I encountered an error processing your message.', parse_mode=None)
             return {'status': 'error'}
 
 
