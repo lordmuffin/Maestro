@@ -1,0 +1,204 @@
+name: 'Terraform Plan'
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-*.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+env:
+  TERRAFORM_VERSION: '1.6.0'
+  WORKING_DIR: './terraform'
+
+jobs:
+  code-quality:
+    name: 'Terraform Format Check'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Format Check
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform fmt -check -recursive
+
+  security-scan:
+    name: 'Security Scanning'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkov Security Scan
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform
+          framework: terraform
+          soft_fail: false  # BLOCKS deployment on security issues
+          output_format: cli
+          quiet: false
+
+      - name: tfsec Security Scan
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: terraform
+          soft_fail: false  # BLOCKS deployment on security issues
+
+  terraform-plan:
+    name: 'Plan Terraform'
+    runs-on: ubuntu-latest
+    needs: [code-quality]
+    environment: terraform-plan
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine Target Environment
+        id: target_env
+        run: |
+          if [[ "${{ github.base_ref }}" == "main" ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "workspace=production" >> $GITHUB_OUTPUT
+            echo "tfvars_file=environments/production.tfvars" >> $GITHUB_OUTPUT
+          else
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "workspace=staging" >> $GITHUB_OUTPUT
+            echo "tfvars_file=environments/staging.tfvars" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform/state/${{ steps.target_env.outputs.environment }}"
+
+      - name: Select Workspace
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform workspace select ${{ steps.target_env.outputs.workspace }} || \
+          terraform workspace new ${{ steps.target_env.outputs.workspace }}
+
+      - name: Terraform Validate
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TF_VAR_github_tokens: '{"maestro":"${{ secrets.GH_TOKEN_MAESTRO }}","beyond":"${{ secrets.GH_TOKEN_BEYOND }}"}'
+          TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
+          TF_VAR_obsidian_drive_folder_id: ${{ vars.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
+          TF_VAR_kanban_folder_id: ${{ vars.KANBAN_FOLDER_ID || '' }}
+          TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
+          TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
+          TF_VAR_repos_config_file: 'repos.json'
+        run: |
+          terraform plan \
+            -var-file="${{ steps.target_env.outputs.tfvars_file }}" \
+            -no-color \
+            -input=false \
+            -out=tfplan \
+            -detailed-exitcode || EXIT_CODE=$?
+
+          echo "exitcode=${EXIT_CODE:-0}" >> $GITHUB_OUTPUT
+          exit ${EXIT_CODE:-0}
+        continue-on-error: true
+
+      - name: Upload Plan Artifact
+        if: steps.plan.outputs.exitcode == '2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ steps.target_env.outputs.environment }}-pr-${{ github.event.pull_request.number }}
+          path: terraform/tfplan
+          retention-days: 30
+
+      - name: Generate Plan Summary
+        id: summary
+        if: always()
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          if [[ "${{ steps.plan.outputs.exitcode }}" == "0" ]]; then
+            echo "status=✅ No changes detected" >> $GITHUB_OUTPUT
+            echo "details=Infrastructure matches configuration" >> $GITHUB_OUTPUT
+          elif [[ "${{ steps.plan.outputs.exitcode }}" == "2" ]]; then
+            echo "status=📝 Changes detected" >> $GITHUB_OUTPUT
+            terraform show -no-color tfplan > plan_output.txt
+            echo "details<<EOF" >> $GITHUB_OUTPUT
+            cat plan_output.txt >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "status=❌ Plan failed" >> $GITHUB_OUTPUT
+            echo "details=Check workflow logs for errors" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment PR with Plan
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `#### Terraform Plan for \`${{ steps.target_env.outputs.environment }}\` Environment
+
+            **Status:** ${{ steps.summary.outputs.status }}
+
+            **Terraform Version:** \`${{ env.TERRAFORM_VERSION }}\`
+            **Workspace:** \`${{ steps.target_env.outputs.workspace }}\`
+            **Config File:** \`${{ steps.target_env.outputs.tfvars_file }}\`
+
+            <details><summary>📋 Show Plan Details</summary>
+
+            \`\`\`terraform
+            ${{ steps.summary.outputs.details }}
+            \`\`\`
+
+            </details>
+
+            ---
+
+            **Next Steps:**
+            1. ✅ Review the plan carefully
+            2. ✅ Ensure security scans passed
+            3. ✅ Approve PR to merge to \`${{ github.base_ref }}\`
+
+            *Pusher: @${{ github.actor }} | Run: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      - name: Plan Status Check
+        if: steps.plan.outputs.exitcode == '1'
+        run: |
+          echo "❌ Terraform plan failed"
+          exit 1

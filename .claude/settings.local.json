@@ -39,7 +39,11 @@
       "Bash(terraform fmt:*)",
       "Bash(find:*)",
       "Bash(gh secret list:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(git -C \"c:\\Users\\andre\\Github\\Maestro\" log --oneline -20)",
+      "Bash(git -C \"c:\\Users\\andre\\Github\\Maestro\" branch -a)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

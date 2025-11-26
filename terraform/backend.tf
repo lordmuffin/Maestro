@@ -1,10 +1,19 @@
 # Backend configuration for Terraform state management
 #
-# Google Cloud Storage backend for state management
+# Google Cloud Storage backend for multi-environment state management
+#
+# State prefix is configured via CLI at init time:
+# - Staging:    terraform init -backend-config="prefix=terraform/state/staging"
+# - Production: terraform init -backend-config="prefix=terraform/state/production"
+#
+# This allows separate state files per environment:
+#   gs://project-maestro-tfstate/terraform/state/staging/default.tfstate
+#   gs://project-maestro-tfstate/terraform/state/production/default.tfstate
 
 terraform {
   backend "gcs" {
-    prefix = "v2v2b-interrogator/state"
+    # Bucket is configured via CLI: -backend-config="bucket=project-maestro-tfstate"
+    # Prefix is configured per environment (see above)
   }
 }
 

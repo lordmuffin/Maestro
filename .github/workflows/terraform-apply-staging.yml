@@ -1,0 +1,175 @@
+name: 'Terraform Apply - Staging'
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-apply-staging.yml'
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  TERRAFORM_VERSION: '1.6.0'
+  WORKING_DIR: './terraform'
+  ENVIRONMENT: 'staging'
+
+jobs:
+  apply-staging:
+    name: 'Apply to Staging'
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform/state/${{ env.ENVIRONMENT }}"
+
+      - name: Select Staging Workspace
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform workspace select ${{ env.ENVIRONMENT }} || \
+          terraform workspace new ${{ env.ENVIRONMENT }}
+
+      - name: Backup Current State
+        id: backup
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform state pull > state-backup-$(date +%Y%m%d-%H%M%S).json
+          echo "State backed up successfully"
+
+      - name: Terraform Plan
+        working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TF_VAR_github_tokens: '{"maestro":"${{ secrets.GH_TOKEN_MAESTRO }}","beyond":"${{ secrets.GH_TOKEN_BEYOND }}"}'
+          TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
+          TF_VAR_obsidian_drive_folder_id: ${{ vars.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
+          TF_VAR_kanban_folder_id: ${{ vars.KANBAN_FOLDER_ID || '' }}
+          TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
+          TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
+          TF_VAR_repos_config_file: 'repos.json'
+        run: |
+          terraform plan \
+            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
+            -no-color \
+            -out=tfplan
+
+      - name: Terraform Apply
+        id: apply
+        working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TF_VAR_github_tokens: '{"maestro":"${{ secrets.GH_TOKEN_MAESTRO }}","beyond":"${{ secrets.GH_TOKEN_BEYOND }}"}'
+          TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
+          TF_VAR_obsidian_drive_folder_id: ${{ vars.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
+          TF_VAR_kanban_folder_id: ${{ vars.KANBAN_FOLDER_ID || '' }}
+          TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
+          TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
+          TF_VAR_repos_config_file: 'repos.json'
+        run: terraform apply -auto-approve tfplan
+        continue-on-error: true
+
+      - name: Get Terraform Outputs
+        if: steps.apply.outcome == 'success'
+        id: outputs
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          echo "function_url=$(terraform output -raw function_url 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
+          echo "function_name=$(terraform output -raw function_name 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
+
+      - name: Rollback on Failure
+        if: steps.apply.outcome == 'failure'
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          echo "❌ Apply failed - initiating automatic rollback"
+
+          # Get previous state version from GCS
+          BUCKET="${{ vars.TERRAFORM_STATE_BUCKET }}"
+          PREFIX="terraform/state/${{ env.ENVIRONMENT }}/default.tfstate"
+
+          # List state versions and get the second most recent (previous version)
+          gsutil ls -a "gs://${BUCKET}/${PREFIX}" | tail -2 | head -1 > previous_state.txt
+          PREVIOUS_STATE=$(cat previous_state.txt)
+
+          if [ -n "$PREVIOUS_STATE" ]; then
+            echo "Restoring state from: $PREVIOUS_STATE"
+            gsutil cp "$PREVIOUS_STATE" rollback_state.json
+            terraform state push rollback_state.json
+            echo "✅ Rollback complete"
+          else
+            echo "⚠️ No previous state version found - cannot rollback"
+          fi
+
+          exit 1
+
+      - name: Create Deployment Summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🚀 Staging Deployment Summary
+
+          **Environment:** \`${{ env.ENVIRONMENT }}\`
+          **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          **Commit:** \`${{ github.sha }}\`
+          **Author:** @${{ github.actor }}
+
+          ### Status
+          ${{ steps.apply.outcome == 'success' && '✅ **Deployment Successful**' || '❌ **Deployment Failed**' }}
+
+          ${{ steps.apply.outcome == 'success' && format('**Function URL:** `{0}`', steps.outputs.outputs.function_url) || '**Rollback:** Automatic rollback initiated' }}
+
+          ### Next Steps
+          ${{ steps.apply.outcome == 'success' && '- Test staging environment\n- Create PR to `main` for production deployment' || '- Check workflow logs\n- Fix issues and push new commit to `develop`' }}
+          EOF
+
+      - name: Notify on Failure
+        if: steps.apply.outcome == 'failure'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ vars.NOTIFICATION_EMAIL }}
+          password: ${{ secrets.EMAIL_APP_PASSWORD }}
+          subject: '❌ Maestro Staging Deployment Failed'
+          to: ${{ vars.NOTIFICATION_EMAIL }}
+          from: 'Maestro GitOps <${{ vars.NOTIFICATION_EMAIL }}>'
+          body: |
+            Staging deployment failed for commit ${{ github.sha }}.
+
+            **Repository:** ${{ github.repository }}
+            **Branch:** ${{ github.ref_name }}
+            **Author:** ${{ github.actor }}
+            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Automatic rollback was initiated.
+
+            Please review the workflow logs for details.
+        continue-on-error: true
+
+      - name: Fail Workflow on Apply Failure
+        if: steps.apply.outcome == 'failure'
+        run: exit 1
