@@ -1,17 +1,46 @@
-name: 'Terraform Deploy'
+# ⚠️⚠️⚠️ WORKFLOW DISABLED - DO NOT RE-ENABLE WITHOUT AUTHORIZATION ⚠️⚠️⚠️
+#
+# This workflow has been DISABLED as part of the GitOps HITL (Human-in-the-Loop) governance implementation.
+#
+# WHY DISABLED:
+# - Contains insecure automatic 'terraform apply' on push to main
+# - Bypasses required human review and approval process
+# - Does not comply with GitOps security requirements
+#
+# REPLACEMENT WORKFLOW:
+# - Use: .github/workflows/terraform-pr-pipeline.yml (for planning)
+# - Future: Phase 2 will add secure deployment workflow
+#
+# TO RE-ENABLE (EMERGENCY ONLY):
+# 1. Get approval from DevOps team lead
+# 2. Rename file to remove .disabled extension
+# 3. Review WORKFLOW_MIGRATION.md for important changes
+# 4. Ensure directory paths are updated (see below)
+# 5. Document emergency use in incident report
+# 6. DISABLE AGAIN after emergency deployment
+#
+# DIRECTORY STRUCTURE CHANGED:
+# - Old: ./terraform
+# - New: iac/maestro-artifacts/terraform
+#
+# LAST DISABLED: 2025-11-26
+# REASON: GitOps Phase 1 - Secure HITL implementation
+# ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+
+name: 'Terraform Deploy (DISABLED - See Warning Above)'
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'terraform/**'
+      - 'iac/maestro-artifacts/terraform/**'
       - '.github/workflows/terraform.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'terraform/**'
+      - 'iac/maestro-artifacts/terraform/**'
       - '.github/workflows/terraform.yml'
   workflow_dispatch:
     inputs:
@@ -27,7 +56,7 @@ on:
 
 env:
   TERRAFORM_VERSION: '1.6.0'
-  WORKING_DIR: './terraform'
+  WORKING_DIR: 'iac/maestro-artifacts/terraform'  # Updated from './terraform'
   TERRAFORM_STATE_BUCKET: ${{ vars.TERRAFORM_STATE_BUCKET }}
   # Terraform variables - centralized configuration
   TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
@@ -253,7 +282,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: ./terraform
+        working-directory: iac/maestro-artifacts/terraform  # Updated from ./terraform
 
     steps:
       - name: Checkout code
@@ -262,13 +291,13 @@ jobs:
       - name: Run tfsec
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
-          working_directory: terraform
+          working_directory: iac/maestro-artifacts/terraform  # Updated from terraform
           soft_fail: true
 
       - name: Run Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
-          directory: terraform
+          directory: iac/maestro-artifacts/terraform  # Updated from terraform
           framework: terraform
           soft_fail: true
           output_format: cli
