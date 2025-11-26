@@ -116,6 +116,12 @@ variable "beyond_repo_name" {
   default     = "lordmuffin/beyond"
 }
 
+variable "kanban_folder_id" {
+  description = "Google Drive folder ID for Kanban board folder"
+  type        = string
+  default     = ""
+}
+
 variable "drive_poll_interval" {
   description = "Seconds between Drive folder checks (only used if webhooks fail)"
   type        = number

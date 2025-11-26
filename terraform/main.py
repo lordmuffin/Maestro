@@ -47,6 +47,7 @@ REPO_NAME = os.environ.get('REPO_NAME')
 FUNCTION_URL = os.environ.get('FUNCTION_URL')
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '')
 OBSIDIAN_DRIVE_FOLDER_ID = os.environ.get('OBSIDIAN_DRIVE_FOLDER_ID', '')
+KANBAN_FOLDER_ID = os.environ.get('KANBAN_FOLDER_ID', '')
 BEYOND_REPO_NAME = os.environ.get('BEYOND_REPO_NAME', 'lordmuffin/beyond')
 
 # Safe integer conversion with error handling
@@ -573,6 +574,322 @@ class GoogleDriveClient:
             return True
         except Exception as e:
             logger.error(f"Error updating file content in Drive: {e}")
+            return False
+
+
+class KanbanManager:
+    """Manages Obsidian Kanban board operations."""
+
+    def __init__(self, drive_client: 'GoogleDriveClient'):
+        self.drive_client = drive_client
+        self._kanban_file_id = None
+        self._kanban_folder_id = None
+
+    def find_kanban_file(self, folder_id: str, filename: str = "Personal Kanban.md") -> Optional[str]:
+        """
+        Search for Kanban file by name within the specified folder.
+
+        Args:
+            folder_id: Google Drive folder ID to search in
+            filename: Name of the Kanban file (default: "Personal Kanban.md")
+
+        Returns:
+            File ID if found, None otherwise
+        """
+        try:
+            # Return cached file_id if available
+            if self._kanban_file_id:
+                return self._kanban_file_id
+
+            # Search for file by name in folder
+            query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+            results = self.drive_client.service.files().list(
+                q=query,
+                fields='files(id, name, modifiedTime)',
+                orderBy='modifiedTime desc'
+            ).execute()
+
+            files = results.get('files', [])
+
+            if not files:
+                logger.warning(f"Kanban file '{filename}' not found in folder {folder_id}")
+                return None
+
+            if len(files) > 1:
+                logger.warning(f"Multiple files named '{filename}' found, using most recent")
+
+            # Cache and return file ID
+            self._kanban_file_id = files[0]['id']
+            logger.info(f"Found Kanban file: {filename} (ID: {self._kanban_file_id})")
+            return self._kanban_file_id
+
+        except Exception as e:
+            logger.error(f"Error finding Kanban file: {e}", exc_info=True)
+            return None
+
+    def extract_action_items(self, note_content: str, note_title: str) -> List[Dict[str, str]]:
+        """
+        Extract action items from the "## Action Items" section of interview notes.
+
+        Args:
+            note_content: Full markdown content of the interview note
+            note_title: Title of the interview note
+
+        Returns:
+            List of action item dictionaries with task, owner, due_date, source_note
+        """
+        import re
+
+        try:
+            # Find the Action Items section
+            section_match = re.search(
+                r'## Action Items\s*\n(.*?)(?=\n##|\Z)',
+                note_content,
+                re.DOTALL | re.MULTILINE
+            )
+
+            if not section_match:
+                logger.info("No Action Items section found in interview note")
+                return []
+
+            action_section = section_match.group(1)
+
+            # Match individual action items
+            # Pattern: - [ ] Task - **Owner:** [[Name]] - **Due:** Date
+            item_pattern = re.compile(
+                r'-\s*\[\s*\]\s*(.+?)\s*-\s*\*\*Owner:\*\*\s*\[\[(.+?)\]\](?:\s*-\s*\*\*Due:\*\*\s*(.+?))?(?=\n|$)',
+                re.MULTILINE
+            )
+
+            items = []
+            for match in item_pattern.finditer(action_section):
+                task = match.group(1).strip()
+                owner = match.group(2).strip()
+                due_date = match.group(3).strip() if match.group(3) else "TBD"
+
+                items.append({
+                    'task': task,
+                    'owner': owner,
+                    'due_date': due_date,
+                    'source_note': note_title
+                })
+
+            logger.info(f"Extracted {len(items)} action items from interview note")
+            return items
+
+        except Exception as e:
+            logger.error(f"Error extracting action items: {e}", exc_info=True)
+            return []
+
+    def transform_to_kanban_format(self, action_items: List[Dict[str, str]], source_note_title: str) -> List[str]:
+        """
+        Transform action items from interview format to Kanban format.
+
+        Args:
+            action_items: List of action item dictionaries
+            source_note_title: Title of the source interview note
+
+        Returns:
+            List of formatted Kanban task strings
+        """
+        kanban_tasks = []
+
+        for item in action_items:
+            # Format: - [ ] #Maestro **Task:** {task} - Owner: [[{owner}]] - Due: {due_date}
+            task_line = f"- [ ] #Maestro **Task:** {item['task']} - Owner: [[{item['owner']}]] - Due: {item['due_date']}"
+
+            # Add source link as sub-item (indented with 2 spaces)
+            source_line = f"  - Source: [[{source_note_title}]]"
+
+            # Combine task and source with newline
+            kanban_tasks.append(f"{task_line}\n{source_line}")
+
+        return kanban_tasks
+
+    def parse_kanban_content(self, content: str) -> Dict[str, Any]:
+        """
+        Parse Kanban markdown file structure.
+
+        Args:
+            content: Full markdown content of Kanban file
+
+        Returns:
+            Dictionary with frontmatter, sections, and settings
+        """
+        import re
+
+        result = {
+            'frontmatter': '',
+            'sections': {},
+            'settings': '',
+            'original_content': content
+        }
+
+        try:
+            # Extract frontmatter
+            fm_match = re.search(r'^(---\s*\n.*?\n---\s*\n)', content, re.DOTALL | re.MULTILINE)
+            if fm_match:
+                result['frontmatter'] = fm_match.group(1)
+
+            # Extract settings block at end
+            settings_match = re.search(r'(%% kanban:settings.*?%%)', content, re.DOTALL)
+            if settings_match:
+                result['settings'] = settings_match.group(1)
+
+            # Find all ## sections
+            section_pattern = re.compile(r'^## (.+?)$', re.MULTILINE)
+            sections = list(section_pattern.finditer(content))
+
+            for i, match in enumerate(sections):
+                section_name = match.group(1).strip()
+                start = match.end()
+
+                # Find end of section (next ## or settings block or EOF)
+                if i + 1 < len(sections):
+                    end = sections[i + 1].start()
+                elif settings_match:
+                    end = settings_match.start()
+                else:
+                    end = len(content)
+
+                section_content = content[start:end].strip()
+
+                result['sections'][section_name] = {
+                    'start_index': start,
+                    'end_index': end,
+                    'content': section_content,
+                    'heading': match.group(0)
+                }
+
+            logger.info(f"Parsed Kanban with {len(result['sections'])} sections")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error parsing Kanban content: {e}", exc_info=True)
+            return result
+
+    def insert_tasks_into_kanban(self, parsed_kanban: Dict[str, Any], new_tasks: List[str]) -> str:
+        """
+        Insert new tasks into the "## New" column of Kanban board.
+
+        Args:
+            parsed_kanban: Parsed Kanban structure from parse_kanban_content()
+            new_tasks: List of formatted task strings to insert
+
+        Returns:
+            Complete updated Kanban file content
+        """
+        import re
+
+        try:
+            # Check if "New" section exists
+            if 'New' not in parsed_kanban['sections']:
+                logger.error("'New' section not found in Kanban board")
+                return parsed_kanban['original_content']
+
+            new_section = parsed_kanban['sections']['New']
+
+            # Build the updated New section content
+            updated_new_content = new_section['content']
+
+            # Add blank line if section already has content
+            if updated_new_content.strip():
+                updated_new_content += "\n\n"
+
+            # Add new tasks with blank line between each
+            updated_new_content += "\n\n".join(new_tasks)
+
+            # Rebuild the entire file
+            updated_content = ""
+
+            # Add frontmatter
+            if parsed_kanban['frontmatter']:
+                updated_content += parsed_kanban['frontmatter'] + "\n"
+
+            # Add all sections in order
+            sections_in_order = []
+            original = parsed_kanban['original_content']
+
+            for section_name, section_data in parsed_kanban['sections'].items():
+                heading_match = re.search(rf'^## {re.escape(section_name)}$', original, re.MULTILINE)
+                if heading_match:
+                    sections_in_order.append((heading_match.start(), section_name, section_data))
+
+            sections_in_order.sort(key=lambda x: x[0])
+
+            for _, section_name, section_data in sections_in_order:
+                updated_content += f"## {section_name}\n\n"
+
+                if section_name == 'New':
+                    updated_content += updated_new_content + "\n\n"
+                else:
+                    updated_content += section_data['content'] + "\n\n"
+
+            # Add settings block at end
+            if parsed_kanban['settings']:
+                updated_content += parsed_kanban['settings']
+
+            return updated_content
+
+        except Exception as e:
+            logger.error(f"Error inserting tasks into Kanban: {e}", exc_info=True)
+            return parsed_kanban['original_content']
+
+    def update_kanban_board(self, action_items: List[Dict[str, str]], source_note_title: str) -> bool:
+        """
+        Main method to update Kanban board with new action items.
+
+        Args:
+            action_items: List of action item dictionaries
+            source_note_title: Title of the source interview note
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if not action_items:
+                logger.info("No action items to add to Kanban")
+                return True
+
+            # Step 1: Find Kanban file
+            if not self._kanban_folder_id:
+                logger.error("KANBAN_FOLDER_ID not configured")
+                return False
+
+            kanban_file_id = self.find_kanban_file(self._kanban_folder_id)
+            if not kanban_file_id:
+                logger.error("Kanban file not found")
+                return False
+
+            # Step 2: Download current content
+            content_bytes = self.drive_client.download_file(kanban_file_id)
+            if not content_bytes:
+                logger.error("Failed to download Kanban file")
+                return False
+
+            content = content_bytes.decode('utf-8')
+
+            # Step 3: Parse Kanban structure
+            parsed = self.parse_kanban_content(content)
+
+            # Step 4: Transform action items to Kanban format
+            kanban_tasks = self.transform_to_kanban_format(action_items, source_note_title)
+
+            # Step 5: Insert tasks into New column
+            updated_content = self.insert_tasks_into_kanban(parsed, kanban_tasks)
+
+            # Step 6: Update file in Google Drive
+            success = self.drive_client.update_file_content(kanban_file_id, updated_content)
+
+            if success:
+                logger.info(f"✅ Successfully added {len(action_items)} tasks to Kanban board")
+                return True
+            else:
+                logger.error("Failed to update Kanban file in Google Drive")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error updating Kanban board: {e}", exc_info=True)
             return False
 
 
@@ -1555,6 +1872,32 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
                             logger.info(f"✅ Saved raw transcript: {raw_filename}")
                     except Exception as raw_error:
                         logger.error(f"Failed to save raw transcript: {raw_error}")
+
+            # Extract and add action items to Kanban
+            try:
+                kanban_manager = KanbanManager(self.drive_client)
+                kanban_manager._kanban_folder_id = KANBAN_FOLDER_ID
+
+                action_items = kanban_manager.extract_action_items(final_notes, title)
+
+                if action_items:
+                    logger.info(f"Found {len(action_items)} action items to add to Kanban")
+                    success = kanban_manager.update_kanban_board(action_items, title)
+
+                    if success:
+                        self.telegram_client.send_message(
+                            chat_id,
+                            f"📋 Added {len(action_items)} action items to Personal Kanban",
+                            parse_mode=None
+                        )
+                    else:
+                        logger.warning("Failed to update Kanban board")
+                else:
+                    logger.info("No action items found in interview notes")
+
+            except Exception as kanban_error:
+                logger.error(f"Error processing Kanban update: {kanban_error}", exc_info=True)
+                # Don't fail interview flow - continue to PR creation
 
             # Create PR in beyond repository
             pr_url = None
