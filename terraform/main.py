@@ -1158,8 +1158,15 @@ class TelegramClient:
             escaped_text = escaped_text.replace(char, f'\\{char}')
         return escaped_text
 
-    def send_message(self, chat_id: int, text: str, reply_markup=None) -> bool:
-        """Send a message to a Telegram chat using synchronous HTTP."""
+    def send_message(self, chat_id: int, text: str, reply_markup=None, parse_mode: str = 'Markdown') -> bool:
+        """Send a message to a Telegram chat using synchronous HTTP.
+
+        Args:
+            chat_id: Telegram chat ID
+            text: Message text
+            reply_markup: Optional inline keyboard markup
+            parse_mode: 'Markdown', 'HTML', or None (default: 'Markdown')
+        """
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
@@ -1167,7 +1174,7 @@ class TelegramClient:
             payload = {
                 'chat_id': chat_id,
                 'text': text,
-                'parse_mode': 'Markdown'
+                'parse_mode': parse_mode
             }
 
             # Add reply markup if provided (for inline keyboards)
@@ -1562,10 +1569,11 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
 
                 logger.info(f"✅ Created PR in beyond repo: {pr_url}")
 
-                # Notify user about PR
+                # Notify user about PR (use plain text to avoid Markdown escaping issues with URLs)
                 self.telegram_client.send_message(
                     chat_id,
-                    f"📝 PR created in beyond repository:\n{pr_url}"
+                    f"📝 PR created in beyond repository:\n{pr_url}",
+                    parse_mode=None
                 )
 
             except Exception as pr_error:
@@ -1583,9 +1591,9 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
                 obsidian_path=str(new_file_path) if new_file_path else "Not saved to Obsidian"
             )
 
-            # Generate and send summary
+            # Generate and send summary (use plain text since it may contain URLs)
             summary = self._generate_summary(session, new_file_path, pr_url)
-            self.telegram_client.send_message(chat_id, summary)
+            self.telegram_client.send_message(chat_id, summary, parse_mode=None if pr_url else 'Markdown')
 
             return {'status': 'ok'}
 
@@ -1618,31 +1626,58 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
         return f"Interview {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
 
     def _generate_summary(self, session: Dict[str, Any], file_path: Optional[str], pr_url: Optional[str] = None) -> str:
-        """Generate completion summary for user."""
+        """Generate completion summary for user.
+
+        If pr_url is provided, generates plain text version (no Markdown) to avoid URL escaping issues.
+        Otherwise, uses Markdown formatting.
+        """
         clarification_count = len(session.get('clarifications', []))
 
-        summary = "✅ *Interview Complete!*\n\n"
+        # Use plain text if PR URL present (to avoid Markdown escaping issues)
+        use_plain = pr_url is not None
 
-        if file_path:
-            summary += f"📝 *Refined Notes Saved*\n"
-            summary += f"   • File: `{file_path}`\n"
-            summary += f"   • Location: Obsidian Google Drive\n\n"
+        if use_plain:
+            summary = "✅ Interview Complete!\n\n"
+
+            if file_path:
+                summary += f"📝 Refined Notes Saved\n"
+                summary += f"   • File: {file_path}\n"
+                summary += f"   • Location: Obsidian Google Drive\n\n"
+            else:
+                summary += "⚠️ Notes finalized but not saved to Obsidian\n\n"
+
+            if pr_url:
+                summary += f"🔀 Pull Request Created\n"
+                summary += f"   • Repository: beyond\n"
+                summary += f"   • URL: {pr_url}\n\n"
+
+            summary += f"💬 Session Stats\n"
+            summary += f"   • Clarifications: {clarification_count} rounds\n"
+            summary += f"   • Source: {'Drive' if session.get('source_file_id') else 'Telegram upload'}\n"
+
+            if session.get('source_file_id') or file_path:
+                summary += f"\n🏷️ Tagged: #MaestroProcessed added to source\n"
+
+            summary += f"\nYour structured notes are ready! 🎉"
         else:
-            summary += "⚠️ *Notes finalized but not saved to Obsidian*\n\n"
+            # Markdown version
+            summary = "✅ *Interview Complete!*\n\n"
 
-        if pr_url:
-            summary += f"🔀 *Pull Request Created*\n"
-            summary += f"   • Repository: beyond\n"
-            summary += f"   • URL: {pr_url}\n\n"
+            if file_path:
+                summary += f"📝 *Refined Notes Saved*\n"
+                summary += f"   • File: `{file_path}`\n"
+                summary += f"   • Location: Obsidian Google Drive\n\n"
+            else:
+                summary += "⚠️ *Notes finalized but not saved to Obsidian*\n\n"
 
-        summary += f"💬 *Session Stats*\n"
-        summary += f"   • Clarifications: {clarification_count} rounds\n"
-        summary += f"   • Source: {'Drive' if session.get('source_file_id') else 'Telegram upload'}\n"
+            summary += f"💬 *Session Stats*\n"
+            summary += f"   • Clarifications: {clarification_count} rounds\n"
+            summary += f"   • Source: {'Drive' if session.get('source_file_id') else 'Telegram upload'}\n"
 
-        if session.get('source_file_id') or file_path:
-            summary += f"\n🏷️ *Tagged*: #MaestroProcessed added to source\n"
+            if session.get('source_file_id') or file_path:
+                summary += f"\n🏷️ *Tagged*: #MaestroProcessed added to source\n"
 
-        summary += f"\nYour structured notes are ready! 🎉"
+            summary += f"\nYour structured notes are ready! 🎉"
 
         return summary
 
