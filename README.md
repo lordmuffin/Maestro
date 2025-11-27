@@ -1,10 +1,11 @@
 # Maestro: AI Executive Assistant
 
-A unified, privacy-first AI platform combining advanced conversational intelligence with deep workflow automation.
+A unified, privacy-first AI platform combining advanced conversational intelligence with deep workflow automation and GitOps infrastructure management.
 
-## 🚀 Current Status: Phase 4 Implementation
+## 🚀 Current Status: Phase 4 Implementation + Infrastructure Automation
 
 **Phase 4: Platform & Ecosystem** - Unified EA Skills Framework with multi-LLM support
+**Infrastructure**: Enterprise-grade GitOps workflows with multi-environment deployment pipeline
 
 ---
 
@@ -24,6 +25,15 @@ A unified, privacy-first AI platform combining advanced conversational intellige
 - **Task Management**: Built-in task tracking and management API
 - **RESTful API**: Complete FastAPI backend with OpenAPI docs
 - **Docker Stack**: Fully containerized with PostgreSQL and Ollama
+
+### GitOps Infrastructure (New)
+- **Multi-Environment Pipeline**: Automated staging → production deployment workflow
+- **GitHub Integration**: Automated PR creation for sessions, transcripts, and interviews
+- **Branch Name Sanitization**: Robust Git ref validation and filesystem-safe naming
+- **Terraform Workflows**: Automated infrastructure validation and deployment
+- **Security Scanning**: Integrated tfsec security checks on all infrastructure changes
+- **Manual Approval Gates**: Production deployments require explicit approval
+- **Drift Detection**: Automated weekly infrastructure drift monitoring
 
 ### Quick Start
 
@@ -265,10 +275,55 @@ Maestro uses a "Tri-Hybrid" architecture:
 - **extract_tasks** - Extract actionable tasks from notes
 - **generate_project_synthesis** - Generate project overviews
 
+#### GitHub Integration (Infrastructure)
+- **Automated PR Creation**: Creates pull requests for:
+  - AI conversation sessions
+  - Meeting transcripts
+  - Interview notes
+- **Branch Sanitization**: Automatic Git ref validation with comprehensive character handling
+- **Multi-Repository Support**: Route content to different repositories based on type
+
 #### Health & Status
 - `GET /health` - Basic health check
 - `GET /health/detailed` - Detailed component status
 - `GET /` - API information
+
+## GitOps & Infrastructure
+
+### GitHub Actions Workflows
+
+Maestro includes enterprise-grade GitOps workflows for infrastructure management:
+
+#### Terraform PR Pipeline
+- **Trigger**: Push to any branch (except main/master) with Terraform changes
+- **Actions**: Format check, init, validate, plan, security scan (tfsec)
+- **Output**: Automated PR with plan details and security findings
+
+#### Staging Deployment
+- **Trigger**: Merge to `develop` branch
+- **Actions**: Auto-deploy to staging environment
+- **Features**: Automatic rollback on failure, deployment summary
+
+#### Production Deployment
+- **Trigger**: Merge to `main` branch
+- **Actions**: Deploy to production with manual approval gate
+- **Safety**: Requires reviewer approval before deployment
+
+#### Drift Detection
+- **Trigger**: Weekly schedule (Mondays 9 AM UTC)
+- **Actions**: Detect infrastructure drift, create GitHub issue
+- **Notifications**: Email alerts on drift detection
+
+### Branch Name Sanitization
+
+The GitHub integration includes robust branch name sanitization:
+- Removes Git-invalid characters (`:`, `~`, `^`, `?`, `*`, `[`, `\`)
+- Handles Unicode and emoji characters gracefully
+- Ensures filesystem compatibility
+- Validates against Git ref naming rules
+- Provides debug logging for troubleshooting
+
+See [GITOPS_SETUP_GUIDE.md](docs/GITOPS_SETUP_GUIDE.md) for detailed setup instructions.
 
 ### Development Roadmap
 
@@ -299,26 +354,51 @@ Maestro uses a "Tri-Hybrid" architecture:
   - Open WebUI pipeline integration
   - Built-in skills (weekly review, search, tasks, synthesis)
 
+- 🚀 **Infrastructure Automation** (Ongoing)
+  - GitHub Actions workflows for Terraform
+  - Multi-environment deployment pipeline (staging, production)
+  - Automated PR creation for AI-generated content
+  - Git ref name sanitization and validation
+  - Security scanning with tfsec
+  - Drift detection and monitoring
+
 ### Project Structure
 
 ```
 maestro/
-├── backend/           # FastAPI backend
-│   ├── core/         # Core modules (RAG, models, database)
-│   ├── api/          # API routes
-│   ├── services/     # Business logic services (path_mapping, etc.)
-│   ├── integrations/ # External integrations (Google Drive, Gemini)
-│   └── tests/        # Unit and integration tests
-├── frontend/         # Open WebUI customizations
-├── infra/            # Docker infrastructure
+├── backend/                        # FastAPI backend
+│   ├── core/                      # Core modules (RAG, models, database)
+│   ├── api/                       # API routes
+│   ├── services/                  # Business logic services (path_mapping, etc.)
+│   ├── integrations/              # External integrations (Google Drive, Gemini)
+│   └── tests/                     # Unit and integration tests
+├── frontend/                      # Open WebUI customizations
+├── infra/                         # Docker infrastructure
 │   ├── docker-compose.yml
-│   └── docker/       # Dockerfiles
-├── scripts/          # Setup and utility scripts
-├── data/            # Data directory (gitignored)
-│   └── vault/       # Place your Obsidian vault here
-├── credentials/     # API credentials (gitignored)
-└── docs/            # Documentation
-    └── guides/      # User guides and tutorials
+│   └── docker/                    # Dockerfiles
+├── iac/                           # Infrastructure as Code
+│   └── maestro-artifacts/
+│       └── terraform/             # Terraform configurations
+│           ├── main.py            # GitHub PR automation (sessions, transcripts, interviews)
+│           ├── backend.tf         # Multi-environment state management
+│           └── environments/      # Environment-specific configs
+├── .github/                       # GitHub Actions workflows
+│   └── workflows/
+│       ├── terraform-pr-pipeline.yml      # PR validation workflow
+│       ├── terraform-apply-staging.yml    # Auto-deploy to staging
+│       ├── terraform-apply-production.yml # Manual production deployment
+│       └── terraform-drift.yml            # Weekly drift detection
+├── scripts/                       # Setup and utility scripts
+│   ├── setup/                     # Initial setup scripts
+│   ├── quick-commit.sh/.ps1       # Developer productivity helpers
+│   └── fix-wif-repo-case.sh/.ps1  # WIF configuration fixes
+├── data/                          # Data directory (gitignored)
+│   └── vault/                     # Place your Obsidian vault here
+├── credentials/                   # API credentials (gitignored)
+└── docs/                          # Documentation
+    ├── guides/                    # User guides and tutorials
+    ├── GITOPS_SETUP_GUIDE.md      # GitOps configuration guide
+    └── GITOPS_IMPLEMENTATION.md   # GitOps implementation details
 ```
 
 ### License
