@@ -205,11 +205,11 @@ ${planText}
 ---
 
 ### 📍 Workflow Information
-- **Triggered by:** ${{ github.actor }}
+- **Triggered by:** ${context.actor}
 - **Source Branch:** ${branchName}
 - **Target Branch:** ${targetBranch}
-- **Workflow Run:** [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-- **Commit:** ${{ github.sha }}
+- **Workflow Run:** [View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+- **Commit:** ${context.sha}
 
 ### 🚀 Next Steps
 1. Review the Terraform plan above
