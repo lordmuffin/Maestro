@@ -29,6 +29,7 @@ jobs:
   plan_and_pr:
     name: 'Terraform Plan & PR Generation'
     runs-on: ubuntu-latest
+    environment: terraform-plan
 
     steps:
       - name: Checkout repository
@@ -55,7 +56,10 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           echo "🚀 Initializing Terraform..."
-          terraform init -input=false
+          terraform init \
+            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform/state/plan" \
+            -input=false
 
       - name: Terraform Validate
         id: validate
