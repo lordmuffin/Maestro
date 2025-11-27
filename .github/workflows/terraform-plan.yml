@@ -122,15 +122,23 @@ jobs:
           TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
           TF_VAR_repos_config_file: 'repos.json'
         run: |
+          set +e
           terraform plan \
             -var-file="${{ steps.target_env.outputs.tfvars_file }}" \
             -no-color \
             -input=false \
             -out=tfplan \
-            -detailed-exitcode || EXIT_CODE=$?
+            -detailed-exitcode 2>&1 | tee plan_output.txt
 
-          echo "exitcode=${EXIT_CODE:-0}" >> $GITHUB_OUTPUT
-          exit ${EXIT_CODE:-0}
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "exitcode=${EXIT_CODE}" >> $GITHUB_OUTPUT
+
+          # Exit code 0 or 2 are success (0=no changes, 2=changes detected)
+          if [[ "${EXIT_CODE}" == "0" ]] || [[ "${EXIT_CODE}" == "2" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
         continue-on-error: true
 
       - name: Upload Plan Artifact
@@ -151,13 +159,18 @@ jobs:
             echo "details=Infrastructure matches configuration" >> $GITHUB_OUTPUT
           elif [[ "${{ steps.plan.outputs.exitcode }}" == "2" ]]; then
             echo "status=📝 Changes detected" >> $GITHUB_OUTPUT
-            terraform show -no-color tfplan > plan_output.txt
             echo "details<<EOF" >> $GITHUB_OUTPUT
-            cat plan_output.txt >> $GITHUB_OUTPUT
+            terraform show -no-color tfplan >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           else
             echo "status=❌ Plan failed" >> $GITHUB_OUTPUT
-            echo "details=Check workflow logs for errors" >> $GITHUB_OUTPUT
+            echo "details<<EOF" >> $GITHUB_OUTPUT
+            if [[ -f plan_output.txt ]]; then
+              cat plan_output.txt >> $GITHUB_OUTPUT
+            else
+              echo "No plan output available. Check workflow logs for errors." >> $GITHUB_OUTPUT
+            fi
+            echo "EOF" >> $GITHUB_OUTPUT
           fi
 
       - name: Comment PR with Plan
