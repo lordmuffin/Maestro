@@ -48,7 +48,10 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           echo "🎨 Checking Terraform format..."
-          terraform fmt -check -recursive || echo "::warning::Terraform formatting issues detected"
+          terraform fmt -check -recursive || {
+            echo "::warning::Terraform formatting issues detected"
+            exit 0
+          }
         continue-on-error: true
 
       - name: Terraform Init
