@@ -50,6 +50,10 @@ OBSIDIAN_DRIVE_FOLDER_ID = os.environ.get('OBSIDIAN_DRIVE_FOLDER_ID', '')
 KANBAN_FOLDER_ID = os.environ.get('KANBAN_FOLDER_ID', '')
 BEYOND_REPO_NAME = os.environ.get('BEYOND_REPO_NAME', 'lordmuffin/beyond')
 
+# Custom MCP Configuration
+MAESTRO_CUSTOM_MCP_CONFIG = os.environ.get('MAESTRO_CUSTOM_MCP_CONFIG', '{}')
+CUSTOM_MCP_AUTH_KEY = os.environ.get('CUSTOM_MCP_AUTH_KEY')
+
 # Safe integer conversion with error handling
 try:
     DRIVE_POLL_INTERVAL = int(os.environ.get('DRIVE_POLL_INTERVAL', '300'))
@@ -67,6 +71,43 @@ logger.info(f"  REPO_NAME: {REPO_NAME if REPO_NAME else 'NOT SET'}")
 logger.info(f"  FUNCTION_URL: {FUNCTION_URL if FUNCTION_URL else 'NOT SET'}")
 logger.info(f"  GOOGLE_DRIVE_FOLDER_ID: {'SET' if GOOGLE_DRIVE_FOLDER_ID else 'NOT SET'}")
 logger.info(f"  OBSIDIAN_DRIVE_FOLDER_ID: {'SET' if OBSIDIAN_DRIVE_FOLDER_ID else 'NOT SET'}")
+logger.info(f"  MAESTRO_CUSTOM_MCP_CONFIG: {'SET' if MAESTRO_CUSTOM_MCP_CONFIG != '{}' else 'NOT SET'}")
+logger.info(f"  CUSTOM_MCP_AUTH_KEY: {'SET' if CUSTOM_MCP_AUTH_KEY else 'NOT SET'}")
+
+# Initialize MCP Registry (Simulated)
+class MCPClientRegistry:
+    """Manages connections to Model Context Protocol (MCP) servers."""
+
+    def __init__(self):
+        self.config = {}
+        self._load_config()
+
+    def _load_config(self):
+        """Load and parse MCP configuration from environment."""
+        try:
+            if MAESTRO_CUSTOM_MCP_CONFIG:
+                self.config = json.loads(MAESTRO_CUSTOM_MCP_CONFIG)
+                logger.info(f"Loaded MCP configuration for {len(self.config)} servers")
+
+                # Inject auth key if available and config has a custom server
+                # This assumes a single custom server or applies the key to all that need it
+                # For this implementation, we'll check if 'my_custom_server' exists as per Terraform
+                if CUSTOM_MCP_AUTH_KEY and 'my_custom_server' in self.config:
+                    self.config['my_custom_server']['auth_token'] = CUSTOM_MCP_AUTH_KEY
+                    logger.info("Injected authentication key into MCP configuration")
+            else:
+                logger.info("No MCP configuration found")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse MAESTRO_CUSTOM_MCP_CONFIG: {e}")
+        except Exception as e:
+            logger.error(f"Error loading MCP config: {e}")
+
+    def get_server_config(self, server_name: str) -> Optional[Dict[str, Any]]:
+        """Retrieve configuration for a specific MCP server."""
+        return self.config.get(server_name)
+
+# Initialize global MCP registry
+_mcp_registry = MCPClientRegistry()
 
 # Validate critical environment variables
 missing_vars = []

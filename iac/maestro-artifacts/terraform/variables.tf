@@ -132,3 +132,14 @@ variable "drive_poll_interval" {
     error_message = "Poll interval must be between 60 and 3600 seconds"
   }
 }
+variable "custom_mcp_endpoint_url" {
+  description = "The full HTTPS/HTTP endpoint URL of the externally deployed custom MCP server. (e.g., https://my-tool.example.com/v1)"
+  type        = string
+  default     = null
+}
+
+variable "custom_mcp_auth_secret_name" {
+  description = "(Optional) The GCP Secret Manager Secret ID/Name (e.g., my-mcp-api-key) containing the API Key or Token for authentication."
+  type        = string
+  default     = null
+}

@@ -93,6 +93,16 @@ resource "google_firestore_database" "database" {
   }
 }
 
+locals {
+  maestro_custom_config_json = (var.custom_mcp_endpoint_url != null && var.custom_mcp_endpoint_url != "") ? jsonencode({
+    // 'my_custom_server' is the internal tool name the LLM will see
+    my_custom_server = {
+      url  = var.custom_mcp_endpoint_url
+      type = "http" // Assume HTTP/SSE connection for remote servers
+    }
+  }) : "{}"
+}
+
 # Create a GCS bucket for function source code
 resource "google_storage_bucket" "function_bucket" {
   name          = "${var.gcp_project}-v2v2b-function-source"
@@ -197,7 +207,8 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
         KANBAN_FOLDER_ID         = var.kanban_folder_id
         DRIVE_POLL_INTERVAL      = tostring(var.drive_poll_interval)
         # Note: FUNCTION_URL is set via output after first deployment
-        FUNCTION_URL = var.function_url != "" ? var.function_url : "https://${var.region}-${var.gcp_project}.cloudfunctions.net/${var.function_name}"
+        FUNCTION_URL              = var.function_url != "" ? var.function_url : "https://${var.region}-${var.gcp_project}.cloudfunctions.net/${var.function_name}"
+        MAESTRO_CUSTOM_MCP_CONFIG = local.maestro_custom_config_json
       },
       # Add per-repository GitHub tokens
       {
@@ -205,6 +216,16 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
         "GITHUB_TOKEN_${upper(label)}" => token
       }
     )
+
+    dynamic "secret_environment_variables" {
+      for_each = var.custom_mcp_auth_secret_name != null ? [1] : []
+      content {
+        key        = "CUSTOM_MCP_AUTH_KEY"
+        project_id = var.gcp_project
+        secret     = var.custom_mcp_auth_secret_name
+        version    = "latest"
+      }
+    }
 
     ingress_settings               = "ALLOW_ALL"
     all_traffic_on_latest_revision = true
