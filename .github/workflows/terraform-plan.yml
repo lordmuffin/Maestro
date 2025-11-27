@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, develop]
     paths:
-      - 'terraform/**'
+      - 'iac/maestro-artifacts/terraform/**'
       - '.github/workflows/terraform-*.yml'
 
 permissions:
@@ -14,7 +14,7 @@ permissions:
 
 env:
   TERRAFORM_VERSION: '1.6.0'
-  WORKING_DIR: './terraform'
+  WORKING_DIR: './iac/maestro-artifacts/terraform'
 
 jobs:
   code-quality:
