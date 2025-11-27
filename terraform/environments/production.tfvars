@@ -16,4 +16,4 @@ labels = {
 }
 
 # Deployment Configuration
-deploy_firestore_rules = true  # Deploy security rules in production
+deploy_firestore_rules = true # Deploy security rules in production
