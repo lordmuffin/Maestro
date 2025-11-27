@@ -1316,6 +1316,123 @@ class GitHubManager:
         self._initialized = True
         logger.info("GitHubManager initialized with multi-repo support")
 
+    @staticmethod
+    def _sanitize_git_ref_name(name: str, max_length: int = 50, allow_slashes: bool = False) -> str:
+        """
+        Sanitize a string for use in Git branch/ref names.
+
+        Git ref naming rules enforced:
+        - Cannot contain: .. ~ ^ : ? * [ \ @{ control chars
+        - Cannot end with .lock . or /
+        - Cannot start with -
+        - Cannot be @ alone
+
+        Args:
+            name: String to sanitize
+            max_length: Maximum length of result (default 50)
+            allow_slashes: If False, replace / with - (default False)
+
+        Returns:
+            Sanitized string safe for Git refs
+
+        Examples:
+            >>> GitHubManager._sanitize_git_ref_name("Feature: Add Login")
+            'Feature-Add-Login'
+            >>> GitHubManager._sanitize_git_ref_name("Bug #123: Fix crash")
+            'Bug-123-Fix-crash'
+        """
+        import re
+        import unicodedata
+
+        if not name or name == '@':
+            return 'unnamed'
+
+        original_name = name
+
+        # Normalize Unicode to ASCII (handles emoji and accents)
+        normalized = unicodedata.normalize('NFKD', name)
+        ascii_str = normalized.encode('ascii', 'ignore').decode('ascii')
+
+        # Replace Git-invalid characters with hyphens
+        result = re.sub(r'[~^:?*\[\\\x00-\x1f\x7f]', '-', ascii_str)
+        result = result.replace('..', '-').replace('@{', '-').replace('@', '-').replace(' ', '-')
+
+        if not allow_slashes:
+            result = result.replace('/', '-')
+
+        # Collapse consecutive hyphens
+        result = re.sub(r'-+', '-', result)
+
+        # Remove leading/trailing invalid chars
+        result = result.strip('-./!')
+
+        # Remove .lock suffix
+        if result.endswith('.lock'):
+            result = result[:-5]
+
+        # Truncate to max_length
+        if len(result) > max_length:
+            result = result[:max_length].rstrip('-./!')
+
+        # Log if sanitization changed the name
+        if result != original_name:
+            logger.debug(f"Sanitized Git ref name: '{original_name}' -> '{result}'")
+
+        return result if result else 'unnamed'
+
+    @staticmethod
+    def _sanitize_filename(name: str, max_length: int = 200) -> str:
+        """
+        Sanitize a string for use in filesystem paths.
+
+        Handles Windows and Unix restrictions:
+        - Cannot contain: < > : " / \ | ? * control chars
+        - Cannot end with . or space (Windows)
+
+        Args:
+            name: String to sanitize
+            max_length: Maximum length of result (default 200)
+
+        Returns:
+            Sanitized string safe for filesystem paths
+
+        Examples:
+            >>> GitHubManager._sanitize_filename("Meeting: Q4 2024")
+            'Meeting-Q4-2024'
+            >>> GitHubManager._sanitize_filename("file/name.txt")
+            'file-name-txt'
+        """
+        import re
+        import unicodedata
+
+        if not name:
+            return 'unnamed'
+
+        original_name = name
+
+        # Normalize Unicode to ASCII
+        normalized = unicodedata.normalize('NFKD', name)
+        ascii_str = normalized.encode('ascii', 'ignore').decode('ascii')
+
+        # Replace filesystem-invalid characters
+        result = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', '-', ascii_str)
+
+        # Collapse consecutive hyphens/spaces
+        result = re.sub(r'[-\s]+', '-', result)
+
+        # Remove leading/trailing invalid chars
+        result = result.strip('-. ')
+
+        # Truncate to max_length
+        if len(result) > max_length:
+            result = result[:max_length].rstrip('-. ')
+
+        # Log if sanitization changed the name
+        if result != original_name:
+            logger.debug(f"Sanitized filename: '{original_name}' -> '{result}'")
+
+        return result if result else 'unnamed'
+
     def _get_repo_for_operation(self, operation: str,
                                  repo_label: Optional[str] = None,
                                  repo_name: Optional[str] = None) -> RepositoryConfig:
@@ -1359,7 +1476,8 @@ class GitHubManager:
 
             # Generate branch name
             timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
-            branch_name = f"session/{session_id.replace('@', '-').replace('.', '-')}-{timestamp}"
+            safe_session_id = self._sanitize_git_ref_name(session_id, max_length=30)
+            branch_name = f"session/{safe_session_id}-{timestamp}"
 
             # Get default branch
             default_branch = repo.default_branch
@@ -1437,7 +1555,7 @@ class GitHubManager:
 
             # Generate branch name from filename and timestamp
             timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-            safe_filename = filename.replace('.', '-').replace(' ', '-')
+            safe_filename = self._sanitize_git_ref_name(filename, max_length=30)
             branch_name = f"transcript/{safe_filename}-{timestamp}"
 
             # Get default branch
@@ -1460,7 +1578,8 @@ class GitHubManager:
             # Create filename for transcripts directory
             date_str = datetime.now().strftime('%Y-%m-%d')
             base_name = filename.rsplit('.', 1)[0]
-            file_path = f"{base_path}{date_str}-{base_name}.md"
+            safe_base_name = self._sanitize_filename(base_name, max_length=100)
+            file_path = f"{base_path}{date_str}-{safe_base_name}.md"
 
             # Commit file
             repo.create_file(
@@ -1585,7 +1704,7 @@ class GitHubManager:
 
             # Generate branch name
             timestamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
-            safe_title = title.replace(' ', '-').replace('/', '-')[:50]
+            safe_title = self._sanitize_git_ref_name(title, max_length=50)
             branch_name = f"interview/{safe_title}-{timestamp}"
 
             # Get default branch and create new branch
@@ -1602,7 +1721,8 @@ class GitHubManager:
 
             # Create filename with date prefix
             date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-            filename = f"{target_path}{date_str} - {title}.md"
+            safe_title_for_file = self._sanitize_filename(title, max_length=150)
+            filename = f"{target_path}{date_str} - {safe_title_for_file}.md"
 
             # Commit file
             commit_message = f"Add interview notes: {title}\n\nSession: {session_id}\nGenerated by Maestro interviewer"
