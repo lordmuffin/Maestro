@@ -61,7 +61,8 @@
       "Bash(gh variable:*)",
       "Bash(gcloud iam workload-identity-pools providers describe:*)",
       "Bash(git commit:*)",
-      "Bash(yamllint:*)"
+      "Bash(yamllint:*)",
+      "Bash(git branch:*)"
     ],
     "deny": [],
     "ask": []

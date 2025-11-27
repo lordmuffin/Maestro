@@ -75,7 +75,7 @@ feature/* → develop → staging (auto-deploy)
 - [ ] GitHub CLI installed (`gh`) and authenticated
 - [ ] Terraform 1.6.0+ installed
 - [ ] `gcloud` CLI installed and authenticated
-- [ ] Access to GCP project: `project-maestro-gcp`
+- [ ] Access to GCP project: `gen-lang-client-0805519538`
 
 ### Phase 1: Push Code Changes
 

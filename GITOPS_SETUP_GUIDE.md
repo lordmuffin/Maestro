@@ -107,7 +107,7 @@ Otherwise, you'll lock yourself out!
   ```
   projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github-readonly
   ```
-- `GCP_SERVICE_ACCOUNT`: `terraform-plan-readonly@project-maestro-gcp.iam.gserviceaccount.com`
+- `GCP_SERVICE_ACCOUNT`: `terraform-plan-readonly@gen-lang-client-0805519538.iam.gserviceaccount.com`
 
 **Environment variables** (click "Add variable"):
 - `TERRAFORM_STATE_BUCKET`: `project-maestro-tfstate`
@@ -126,12 +126,12 @@ Otherwise, you'll lock yourself out!
   - Add branch: `develop`
 
 **Environment secrets:**
-- `GCP_PROJECT_ID`: `project-maestro-gcp`
+- `GCP_PROJECT_ID`: `gen-lang-client-0805519538`
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`: (staging WIF provider)
   ```
   projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github-staging
   ```
-- `GCP_SERVICE_ACCOUNT`: `terraform-staging@project-maestro-gcp.iam.gserviceaccount.com`
+- `GCP_SERVICE_ACCOUNT`: `terraform-staging@gen-lang-client-0805519538.iam.gserviceaccount.com`
 - `TELEGRAM_BOT_TOKEN`: (staging bot token, or reuse production for testing)
 - `GH_TOKEN_MAESTRO`: (GitHub token for maestro repo)
 - `GH_TOKEN_BEYOND`: (GitHub token for beyond repo)
@@ -155,8 +155,8 @@ Otherwise, you'll lock yourself out!
   - Add branch: `main`
 - **Wait timer**: 0 minutes (immediate after approval)
 
-**Environment secrets** (copy from existing `project-maestro-gcp` environment):
-- `GCP_PROJECT_ID`: `project-maestro-gcp`
+**Environment secrets** (copy from existing `gen-lang-client-0805519538` environment):
+- `GCP_PROJECT_ID`: `gen-lang-client-0805519538`
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`: (production WIF provider)
 - `GCP_SERVICE_ACCOUNT`: (production service account)
 - `TELEGRAM_BOT_TOKEN`: (production bot token)
@@ -180,19 +180,19 @@ Otherwise, you'll lock yourself out!
 # Create service account
 gcloud iam service-accounts create terraform-staging \
   --display-name="Terraform Staging Deployer" \
-  --project=project-maestro-gcp
+  --project=gen-lang-client-0805519538
 
 # Grant required roles
-gcloud projects add-iam-policy-binding project-maestro-gcp \
-  --member="serviceAccount:terraform-staging@project-maestro-gcp.iam.gserviceaccount.com" \
+gcloud projects add-iam-policy-binding gen-lang-client-0805519538 \
+  --member="serviceAccount:terraform-staging@gen-lang-client-0805519538.iam.gserviceaccount.com" \
   --role="roles/editor"
 
-gcloud projects add-iam-policy-binding project-maestro-gcp \
-  --member="serviceAccount:terraform-staging@project-maestro-gcp.iam.gserviceaccount.com" \
+gcloud projects add-iam-policy-binding gen-lang-client-0805519538 \
+  --member="serviceAccount:terraform-staging@gen-lang-client-0805519538.iam.gserviceaccount.com" \
   --role="roles/serviceusage.serviceUsageAdmin"
 
-gcloud projects add-iam-policy-binding project-maestro-gcp \
-  --member="serviceAccount:terraform-staging@project-maestro-gcp.iam.gserviceaccount.com" \
+gcloud projects add-iam-policy-binding gen-lang-client-0805519538 \
+  --member="serviceAccount:terraform-staging@gen-lang-client-0805519538.iam.gserviceaccount.com" \
   --role="roles/iam.serviceAccountAdmin"
 ```
 
@@ -201,16 +201,16 @@ gcloud projects add-iam-policy-binding project-maestro-gcp \
 # Create service account
 gcloud iam service-accounts create terraform-plan-readonly \
   --display-name="Terraform Plan Read-Only" \
-  --project=project-maestro-gcp
+  --project=gen-lang-client-0805519538
 
 # Grant viewer role (read-only)
-gcloud projects add-iam-policy-binding project-maestro-gcp \
-  --member="serviceAccount:terraform-plan-readonly@project-maestro-gcp.iam.gserviceaccount.com" \
+gcloud projects add-iam-policy-binding gen-lang-client-0805519538 \
+  --member="serviceAccount:terraform-plan-readonly@gen-lang-client-0805519538.iam.gserviceaccount.com" \
   --role="roles/viewer"
 
 # Grant state bucket read access
 gsutil iam ch \
-  serviceAccount:terraform-plan-readonly@project-maestro-gcp.iam.gserviceaccount.com:objectViewer \
+  serviceAccount:terraform-plan-readonly@gen-lang-client-0805519538.iam.gserviceaccount.com:objectViewer \
   gs://project-maestro-tfstate
 ```
 
@@ -222,7 +222,7 @@ gsutil iam ch \
 gcloud iam workload-identity-pools create github \
   --location="global" \
   --display-name="GitHub Actions" \
-  --project=project-maestro-gcp
+  --project=gen-lang-client-0805519538
 
 # Create provider for staging
 gcloud iam workload-identity-pools providers create-oidc github-staging \
@@ -231,14 +231,14 @@ gcloud iam workload-identity-pools providers create-oidc github-staging \
   --issuer-uri="https://token.actions.githubusercontent.com" \
   --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.actor=assertion.actor" \
   --attribute-condition="assertion.repository=='lordmuffin/maestro'" \
-  --project=project-maestro-gcp
+  --project=gen-lang-client-0805519538
 
 # Bind service account to GitHub
 gcloud iam service-accounts add-iam-policy-binding \
-  terraform-staging@project-maestro-gcp.iam.gserviceaccount.com \
+  terraform-staging@gen-lang-client-0805519538.iam.gserviceaccount.com \
   --role="roles/iam.workloadIdentityUser" \
   --member="principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/lordmuffin/maestro" \
-  --project=project-maestro-gcp
+  --project=gen-lang-client-0805519538
 ```
 
 #### For Read-Only (Plan)
@@ -250,14 +250,14 @@ gcloud iam workload-identity-pools providers create-oidc github-plan \
   --issuer-uri="https://token.actions.githubusercontent.com" \
   --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
   --attribute-condition="assertion.repository=='lordmuffin/maestro'" \
-  --project=project-maestro-gcp
+  --project=gen-lang-client-0805519538
 
 # Bind read-only service account
 gcloud iam service-accounts add-iam-policy-binding \
-  terraform-plan-readonly@project-maestro-gcp.iam.gserviceaccount.com \
+  terraform-plan-readonly@gen-lang-client-0805519538.iam.gserviceaccount.com \
   --role="roles/iam.workloadIdentityUser" \
   --member="principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/lordmuffin/maestro" \
-  --project=project-maestro-gcp
+  --project=gen-lang-client-0805519538
 ```
 
 ### Enable GCS State Versioning

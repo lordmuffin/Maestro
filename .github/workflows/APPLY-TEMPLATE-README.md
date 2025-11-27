@@ -117,7 +117,7 @@ jobs:
 The template automatically configures environments:
 
 #### Production Environment
-- **GitHub Environment**: `project-maestro-gcp`
+- **GitHub Environment**: `gen-lang-client-0805519538`
 - **Region**: `us-central1`
 - **Instance Range**: 1-20
 - **Approval**: Required
