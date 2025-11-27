@@ -272,7 +272,7 @@ resource "google_firebaserules_ruleset" "firestore" {
 
   source {
     files {
-      name = "firestore.rules"
+      name    = "firestore.rules"
       content = file("${path.module}/firestore.rules")
     }
   }

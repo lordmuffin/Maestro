@@ -40,7 +40,7 @@ output "upload_ui_url_template" {
 
 output "deployment_summary" {
   description = "Summary of deployment information"
-  value = <<-EOT
+  value       = <<-EOT
 
   ================================================================
   V2V2B Interrogator Deployment Summary
