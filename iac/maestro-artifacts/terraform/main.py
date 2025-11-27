@@ -141,9 +141,16 @@ Your goal is to extract valuable technical knowledge through respectful, focused
 Be professional, curious, and methodical. Ask clarifying questions to uncover design decisions,
 implementation details, and architectural insights.""",
 
-        "multimodal_analysis_prompt.md": """Analyze this audio or image content and extract meaningful information.
+        "multimodal_analysis_prompt.md": """# Role: Archivist
+Analyze this audio or image content and extract meaningful information.
 Provide structured insights including: key topics, technical concepts, action items, and areas needing clarification.
-Be accurate, thorough, and well-organized in your analysis.""",
+Be accurate, thorough, and well-organized in your analysis.
+
+# Critical Instruction:
+If the image contains ambiguous text, cut-off diagrams, or unclear handwriting, do NOT guess. Instead, output the specific token [CLARIFICATION_NEEDED] followed by your question.
+
+Example:
+[CLARIFICATION_NEEDED] The text in the bottom left corner is unreadable. Is it 'Function A' or 'Function B'?""",
 
         "transcript_analysis_prompt.md": """Analyze this transcript and extract:
 1. Key architectural concepts and design patterns mentioned
@@ -1147,7 +1154,15 @@ class GeminiClient:
                 return f"Unsupported file type: {mime_type}. Supported: image, audio, video, PDF"
 
             # Create prompt
-            prompt_part = Part.from_text(f"{get_prompt('multimodal_analysis_prompt.md')}\n\nFile: {filename}")
+            # Check for Archivist specific instruction in the prompt
+            base_prompt = get_prompt('multimodal_analysis_prompt.md')
+            prompt_text = f"{base_prompt}\n\nFile: {filename}"
+
+            # If not already present (e.g. from file override), ensure instruction is added
+            if "[CLARIFICATION_NEEDED]" not in prompt_text:
+                prompt_text += "\n\nCRITICAL: If the content is ambiguous, unclear, or cut-off, do NOT guess. Output [CLARIFICATION_NEEDED] followed by your question."
+
+            prompt_part = Part.from_text(prompt_text)
 
             # Generate analysis
             response = self.model.generate_content([prompt_part, part])
@@ -2339,9 +2354,12 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
                 else:
                     self.telegram_client.send_message(chat_id, '❌ Only .txt, .md, and .pdf files are supported for documents.')
                     return {'status': 'error'}
-            elif 'audio' in message or 'photo' in message:
-                # Redirect audio and photos to web UI (can be extended later)
-                info_text = "📎 For audio and images, please use the web interface:\n"
+            elif 'photo' in message:
+                # Process images (Archivist Loop)
+                return self._process_image_file(session_id, chat_id, message['photo'])
+            elif 'audio' in message:
+                # Redirect audio to web UI (can be extended later)
+                info_text = "📎 For audio files, please use the web interface:\n"
                 info_text += f"{FUNCTION_URL}?mode=ui&session={session_id}"
                 self.telegram_client.send_message(chat_id, info_text)
                 return {'status': 'ok'}
@@ -2498,6 +2516,82 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
         except Exception as e:
             logger.error(f"Error processing PDF: {e}", exc_info=True)
             self.telegram_client.send_message(chat_id, f'❌ Error processing PDF: {str(e)}')
+            return {'status': 'error'}
+
+    def _process_image_file(self, session_id: str, chat_id: int, photos: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Process uploaded image file (Archivist Loop)."""
+        try:
+            # Get the largest photo (last in list)
+            photo = photos[-1]
+            file_id = photo['file_id']
+            filename = f"image_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.jpg"
+            file_size = photo.get('file_size', 0)
+
+            logger.info(f"Processing image: {filename}, Size: {file_size}, FileID: {file_id}")
+            self.telegram_client.send_message(chat_id, f'🖼️ Analyzing image with Archivist persona...')
+
+            # Download image
+            file_data = self.telegram_client.download_file(file_id)
+            if not file_data:
+                self.telegram_client.send_message(chat_id, '❌ Failed to download image.')
+                return {'status': 'error'}
+
+            # Analyze with Gemini (multimodal)
+            analysis = self.gemini.analyze_multimodal(file_data, 'image/jpeg', filename)
+
+            # Check for clarification request
+            if '[CLARIFICATION_NEEDED]' in analysis:
+                # Extract the question (everything after the token)
+                parts = analysis.split('[CLARIFICATION_NEEDED]', 1)
+                pre_context = parts[0]
+                question = parts[1].strip()
+
+                # Activate interviewer mode for clarification
+                # We store the initial analysis + context in 'original_content'
+                FirestoreManager.create_interviewer_session(
+                    session_id=session_id,
+                    source_file_id=file_id, # Track Telegram file ID
+                    source_file_path=None,
+                    original_content=f"Image Analysis Context:\n{pre_context}\n\nClarification Question:\n{question}"
+                )
+
+                # Save the system question to history
+                FirestoreManager.save_message(session_id, 'assistant', f"[CLARIFICATION REQUEST] {question}", str(chat_id))
+
+                # Send warning/question to user
+                warning_msg = f"⚠️ **CLARIFICATION NEEDED**\n\nThe Archivist needs your help:\n_{question}_"
+                self.telegram_client.send_message(chat_id, warning_msg)
+                self.telegram_client.send_message(chat_id, "Please reply with your answer, or type /done to skip.")
+
+                return {'status': 'ok'}
+
+            # No clarification needed - proceed to structure notes
+            # Generate structured notes
+            structured_notes = self._generate_structured_notes(analysis, filename, 'image')
+
+            # Create validation ID
+            validation_id = f"{session_id}_{file_id}"
+
+            # Save to pending validations
+            FirestoreManager.save_pending_validation(
+                validation_id=validation_id,
+                session_id=session_id,
+                chat_id=chat_id,
+                file_type='image',
+                filename=filename,
+                content=analysis,
+                structured_notes=structured_notes,
+                file_data=file_data
+            )
+
+            # Send preview with validation buttons
+            self._send_validation_prompt(chat_id, filename, structured_notes, validation_id)
+
+            return {'status': 'ok'}
+
+        except Exception as e:
+            logger.error(f"Error processing image file: {e}", exc_info=True)
+            self.telegram_client.send_message(chat_id, f'❌ Error processing image: {str(e)}')
             return {'status': 'error'}
 
     def _process_video_file(self, session_id: str, chat_id: int, video: Dict[str, Any]) -> Dict[str, Any]:
