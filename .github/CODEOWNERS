@@ -1,0 +1,32 @@
+# Maestro Repository Code Owners
+# This file defines code ownership for the Maestro repository
+# All changes require approval from the designated owners
+
+# Default owner for all files
+* @lordmuffin
+
+# Infrastructure & CI/CD (Critical - requires careful review)
+/terraform/ @lordmuffin
+/.github/workflows/ @lordmuffin
+/.github/CODEOWNERS @lordmuffin
+
+# Application code
+/agents/ @lordmuffin
+/backend/ @lordmuffin
+/infra/ @lordmuffin
+
+# Kubernetes manifests
+/k8s/ @lordmuffin
+
+# Documentation
+*.md @lordmuffin
+/docs/ @lordmuffin
+
+# Configuration files
+/.env* @lordmuffin
+/docker-compose*.yml @lordmuffin
+/docker-stack.yml @lordmuffin
+
+# Personal workspace (still requires PR, but can be auto-approved via script)
+/sessions/ @lordmuffin
+/.claude/ @lordmuffin
