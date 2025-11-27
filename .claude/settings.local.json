@@ -58,7 +58,9 @@
       "Bash(gcloud iam workload-identity-pools providers create-oidc:*)",
       "Bash(gcloud iam service-accounts add-iam-policy-binding:*)",
       "Bash(gcloud storage buckets:*)",
-      "Bash(gh variable:*)"
+      "Bash(gh variable:*)",
+      "Bash(gcloud iam workload-identity-pools providers describe:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
