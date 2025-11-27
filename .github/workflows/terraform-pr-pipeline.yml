@@ -319,3 +319,4 @@ jobs:
           echo "- This workflow only generates a plan and creates a PR" >> $GITHUB_STEP_SUMMARY
           echo "- Deployment requires manual PR approval and merge" >> $GITHUB_STEP_SUMMARY
           echo "- All changes must pass HITL governance gates" >> $GITHUB_STEP_SUMMARY
+# Trigger workflow with latest fixes
