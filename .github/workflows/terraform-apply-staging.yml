@@ -104,6 +104,20 @@ jobs:
             "projects/${{ secrets.GCP_PROJECT_ID }}/releases/cloud.firestore" \
             2>&1 | grep -v "Enter a value" || echo "⚠️ Firestore rules release not imported (may already be in state or not exist)"
 
+          # Import Cloud Function (ignore errors if doesn't exist or already in state)
+          terraform import \
+            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
+            google_cloudfunctions2_function.v2v2b_interrogator \
+            "projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/functions/v2v2b-interrogator-${{ env.ENVIRONMENT }}" \
+            2>&1 | grep -v "Enter a value" || echo "⚠️ Cloud Function not imported (may already be in state or not exist)"
+
+          # Import Cloud Run IAM member (ignore errors if doesn't exist or already in state)
+          terraform import \
+            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
+            google_cloud_run_service_iam_member.public_access \
+            "v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/services/v2v2b-interrogator-${{ env.ENVIRONMENT }} roles/run.invoker allUsers" \
+            2>&1 | grep -v "Enter a value" || echo "⚠️ Cloud Run IAM member not imported (may already be in state or not exist)"
+
           echo "✅ Import step complete"
         continue-on-error: true
 
