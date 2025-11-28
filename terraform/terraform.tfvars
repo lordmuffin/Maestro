@@ -8,7 +8,11 @@ region      = "us-central1"
 
 # GitHub Integration
 # These will be populated from GitHub secrets in CI/CD
+<<<<<<< HEAD
 github_token = ""                  # Set via TF_VAR_github_token in GitHub Actions
+=======
+github_token = "" # Set via TF_VAR_github_token in GitHub Actions
+>>>>>>> origin/develop
 repo_name    = "lordmuffin/Maestro"
 
 # Google Drive Integration (Optional)
@@ -21,7 +25,11 @@ drive_poll_interval      = 300
 
 # Function Configuration
 function_name = "v2v2b-interrogator"
+<<<<<<< HEAD
 function_url = "" # Will be populated after first deployment
+=======
+function_url  = "" # Will be populated after first deployment
+>>>>>>> origin/develop
 
 # Resource Configuration
 memory             = "512Mi"

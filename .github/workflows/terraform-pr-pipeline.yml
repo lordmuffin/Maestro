@@ -24,11 +24,19 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+<<<<<<< HEAD
+=======
+  id-token: write
+>>>>>>> origin/develop
 
 jobs:
   plan_and_pr:
     name: 'Terraform Plan & PR Generation'
     runs-on: ubuntu-latest
+<<<<<<< HEAD
+=======
+    environment: terraform-plan
+>>>>>>> origin/develop
 
     steps:
       - name: Checkout repository
@@ -42,12 +50,28 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
+<<<<<<< HEAD
+=======
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+>>>>>>> origin/develop
       - name: Terraform Format Check
         id: fmt
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           echo "🎨 Checking Terraform format..."
+<<<<<<< HEAD
           terraform fmt -check -recursive || echo "::warning::Terraform formatting issues detected"
+=======
+          terraform fmt -check -recursive || {
+            echo "::warning::Terraform formatting issues detected"
+            exit 0
+          }
+>>>>>>> origin/develop
         continue-on-error: true
 
       - name: Terraform Init
@@ -55,7 +79,14 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           echo "🚀 Initializing Terraform..."
+<<<<<<< HEAD
           terraform init -input=false
+=======
+          terraform init \
+            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform/state/plan" \
+            -input=false
+>>>>>>> origin/develop
 
       - name: Terraform Validate
         id: validate
@@ -153,9 +184,15 @@ jobs:
             let securitySection = '';
             try {
               const securityFindings = fs.readFileSync('/tmp/security_findings.txt', 'utf8');
+<<<<<<< HEAD
               securitySection = `\n\n## 🔒 Security Scan Results\n\n${securityFindings}\n`;
             } catch (e) {
               securitySection = '\n\n## ✅ Security Scan\n\nNo security issues detected by tfsec.\n';
+=======
+              securitySection = `\n\n## Security Scan Results\n\n${securityFindings}\n`;
+            } catch (e) {
+              securitySection = '\n\n## Security Scan\n\nNo security issues detected by tfsec.\n';
+>>>>>>> origin/develop
             }
 
             // Get branch information
@@ -164,12 +201,17 @@ jobs:
 
             // Don't create PR if we're already on main/master
             if (branchName === 'main' || branchName === 'master') {
+<<<<<<< HEAD
               console.log('⚠️ Already on main/master branch, skipping PR creation');
+=======
+              console.log('Already on main/master branch, skipping PR creation');
+>>>>>>> origin/develop
               return;
             }
 
             const title = `[Maestro GitOps] Infrastructure Update Proposal from ${branchName}`;
 
+<<<<<<< HEAD
             const body = `## 🤖 Maestro Proposed Execution Plan (Awaiting HITL Review)
 
 This Pull Request contains an infrastructure change proposed by the **Maestro AI Agent**.
@@ -222,6 +264,44 @@ ${planText}
 *Artifact Contract Version: 1.0*
 *Working Directory: \`iac/maestro-artifacts/terraform/\`*
 `;
+=======
+            const body = `## Maestro Proposed Execution Plan (Awaiting HITL Review)\n\n` +
+              `This Pull Request contains an infrastructure change proposed by the **Maestro AI Agent**.\n\n` +
+              `### Human-in-the-Loop (HITL) Governance Gate\n` +
+              `The **HITL governance gate** is enforced by requiring:\n` +
+              `- Mandatory team review and approval\n` +
+              `- Policy-as-Code validation (Phase 2, future enhancement)\n` +
+              `- Security scanning and compliance checks\n\n` +
+              `**IMPORTANT:** This PR contains a Terraform plan only. No infrastructure changes have been applied yet.\n\n` +
+              `### Review Checklist\n` +
+              `- [ ] Verify that the proposed changes align with the intended modifications\n` +
+              `- [ ] Check for unexpected resource deletions or modifications\n` +
+              `- [ ] Validate security scan results\n` +
+              `- [ ] Ensure compliance with organizational policies\n` +
+              `- [ ] Confirm cost implications are acceptable\n` +
+              securitySection + `\n` +
+              `### Terraform Plan Output\n\n` +
+              `<details>\n` +
+              `<summary>Click to expand full Terraform plan</summary>\n\n` +
+              `\`\`\`hcl\n${planText}\n\`\`\`\n\n` +
+              `</details>\n\n` +
+              `---\n\n` +
+              `### Workflow Information\n` +
+              `- **Triggered by:** ${context.actor}\n` +
+              `- **Source Branch:** ${branchName}\n` +
+              `- **Target Branch:** ${targetBranch}\n` +
+              `- **Workflow Run:** [View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n` +
+              `- **Commit:** ${context.sha}\n\n` +
+              `### Next Steps\n` +
+              `1. Review the Terraform plan above\n` +
+              `2. Approve this PR if changes are correct\n` +
+              `3. Merge this PR to trigger the deployment workflow (Phase 2)\n` +
+              `4. Monitor the deployment for any issues\n\n` +
+              `---\n` +
+              `*This PR was automatically generated by Maestro GitOps Workflow*\n` +
+              `*Artifact Contract Version: 1.0*\n` +
+              `*Working Directory: \`iac/maestro-artifacts/terraform/\`*`;
+>>>>>>> origin/develop
 
             try {
               // Check if PR already exists
@@ -321,3 +401,7 @@ ${planText}
           echo "- This workflow only generates a plan and creates a PR" >> $GITHUB_STEP_SUMMARY
           echo "- Deployment requires manual PR approval and merge" >> $GITHUB_STEP_SUMMARY
           echo "- All changes must pass HITL governance gates" >> $GITHUB_STEP_SUMMARY
+<<<<<<< HEAD
+=======
+# Trigger workflow with latest fixes
+>>>>>>> origin/develop
