@@ -194,6 +194,14 @@ gcloud projects add-iam-policy-binding gen-lang-client-0805519538 \
 gcloud projects add-iam-policy-binding gen-lang-client-0805519538 \
   --member="serviceAccount:terraform-staging@gen-lang-client-0805519538.iam.gserviceaccount.com" \
   --role="roles/iam.serviceAccountAdmin"
+
+gcloud projects add-iam-policy-binding gen-lang-client-0805519538 \
+  --member="serviceAccount:terraform-staging@gen-lang-client-0805519538.iam.gserviceaccount.com" \
+  --role="roles/resourcemanager.projectIamAdmin"
+
+gcloud projects add-iam-policy-binding gen-lang-client-0805519538 \
+  --member="serviceAccount:terraform-staging@gen-lang-client-0805519538.iam.gserviceaccount.com" \
+  --role="roles/datastore.owner"
 ```
 
 #### 2. Read-Only Service Account (for plan-only)
