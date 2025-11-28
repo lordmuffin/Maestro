@@ -50,7 +50,7 @@ cd c:\Users\andre\Github\Maestro
 **Add Environment Secrets:**
 - Click "Add secret" for each:
   - `GCP_WORKLOAD_IDENTITY_PROVIDER`: (copy from script output - github-readonly provider)
-  - `GCP_SERVICE_ACCOUNT`: `terraform-plan-readonly@project-maestro-gcp.iam.gserviceaccount.com`
+  - `GCP_SERVICE_ACCOUNT`: `terraform-plan-readonly@gen-lang-client-0805519538.iam.gserviceaccount.com`
 
 **Add Environment Variables:**
 - Click "Add variable":
@@ -71,8 +71,8 @@ cd c:\Users\andre\Github\Maestro
 **Add Environment Secrets:**
 - Click "Add secret" for each:
   - `GCP_WORKLOAD_IDENTITY_PROVIDER`: (copy from script output - github-staging provider)
-  - `GCP_SERVICE_ACCOUNT`: `terraform-staging@project-maestro-gcp.iam.gserviceaccount.com`
-  - `GCP_PROJECT_ID`: `project-maestro-gcp`
+  - `GCP_SERVICE_ACCOUNT`: `terraform-staging@gen-lang-client-0805519538.iam.gserviceaccount.com`
+  - `GCP_PROJECT_ID`: `gen-lang-client-0805519538`
   - `TELEGRAM_BOT_TOKEN`: (your existing token - copy from current secrets)
   - `GH_TOKEN_MAESTRO`: (your existing token - copy from current secrets)
   - `GH_TOKEN_BEYOND`: (your existing token - copy from current secrets)
@@ -106,7 +106,7 @@ cd c:\Users\andre\Github\Maestro
 (Copy all secrets from your existing GitHub secrets OR from staging environment)
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`: (use existing production WIF provider)
 - `GCP_SERVICE_ACCOUNT`: (use existing production service account)
-- `GCP_PROJECT_ID`: `project-maestro-gcp`
+- `GCP_PROJECT_ID`: `gen-lang-client-0805519538`
 - `TELEGRAM_BOT_TOKEN`: (production bot token)
 - `GH_TOKEN_MAESTRO`: (same as staging)
 - `GH_TOKEN_BEYOND`: (same as staging)
@@ -157,7 +157,7 @@ cd c:\Users\andre\Github\Maestro
 **Solution:** Ensure you're authenticated with gcloud:
 ```powershell
 gcloud auth login
-gcloud config set project project-maestro-gcp
+gcloud config set project gen-lang-client-0805519538
 ```
 
 ### Issue: Can't find existing secrets to copy

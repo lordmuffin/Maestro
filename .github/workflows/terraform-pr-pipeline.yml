@@ -7,7 +7,7 @@ on:
       - '!main'
       - '!master'
     paths:
-      - 'iac/maestro-artifacts/terraform/**'
+      - 'terraform/**'
   workflow_dispatch:
     inputs:
       target_branch:
@@ -17,18 +17,20 @@ on:
         default: 'main'
 
 env:
-  TF_WORKING_DIR: iac/maestro-artifacts/terraform
+  TF_WORKING_DIR: terraform
   TERRAFORM_VERSION: '1.6.0'
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
+  id-token: write
 
 jobs:
   plan_and_pr:
     name: 'Terraform Plan & PR Generation'
     runs-on: ubuntu-latest
+    environment: terraform-plan
 
     steps:
       - name: Checkout repository
@@ -42,12 +44,21 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
       - name: Terraform Format Check
         id: fmt
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           echo "🎨 Checking Terraform format..."
-          terraform fmt -check -recursive || echo "::warning::Terraform formatting issues detected"
+          terraform fmt -check -recursive || {
+            echo "::warning::Terraform formatting issues detected"
+            exit 0
+          }
         continue-on-error: true
 
       - name: Terraform Init
@@ -55,7 +66,10 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           echo "🚀 Initializing Terraform..."
-          terraform init -input=false
+          terraform init \
+            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform/state/plan" \
+            -input=false
 
       - name: Terraform Validate
         id: validate
@@ -67,8 +81,22 @@ jobs:
       - name: Terraform Plan
         id: plan
         working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID || 'gen-lang-client-0805519538' }}
+          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TF_VAR_github_tokens: '{"maestro":"${{ secrets.GH_TOKEN_MAESTRO }}","beyond":"${{ secrets.GH_TOKEN_BEYOND }}"}'
+          TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
+          TF_VAR_obsidian_drive_folder_id: ${{ vars.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
+          TF_VAR_kanban_folder_id: ${{ vars.KANBAN_FOLDER_ID || '' }}
+          TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
+          TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
+          TF_VAR_repos_config_file: 'repos.json'
         run: |
           echo "📋 Generating Terraform plan..."
+          # Note: PR pipeline runs a speculative plan without specific environment tfvars
+          # to check for general errors, or defaults if available.
+          # Ideally, this should target an environment or use a mock tfvars.
+          # For now, providing required variables via env vars is a minimum.
           terraform plan -no-color -input=false -out=tfplan.binary 2>&1 | tee plan_output.txt
 
           # Capture exit code
@@ -141,7 +169,7 @@ jobs:
       - name: Create or Update Pull Request
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN_MAESTRO }}
           script: |
             const fs = require('fs');
             const path = require('path');
@@ -153,9 +181,9 @@ jobs:
             let securitySection = '';
             try {
               const securityFindings = fs.readFileSync('/tmp/security_findings.txt', 'utf8');
-              securitySection = `\n\n## 🔒 Security Scan Results\n\n${securityFindings}\n`;
+              securitySection = `\n\n## Security Scan Results\n\n${securityFindings}\n`;
             } catch (e) {
-              securitySection = '\n\n## ✅ Security Scan\n\nNo security issues detected by tfsec.\n';
+              securitySection = '\n\n## Security Scan\n\nNo security issues detected by tfsec.\n';
             }
 
             // Get branch information
@@ -164,64 +192,48 @@ jobs:
 
             // Don't create PR if we're already on main/master
             if (branchName === 'main' || branchName === 'master') {
-              console.log('⚠️ Already on main/master branch, skipping PR creation');
+              console.log('Already on main/master branch, skipping PR creation');
               return;
             }
 
             const title = `[Maestro GitOps] Infrastructure Update Proposal from ${branchName}`;
 
-            const body = `## 🤖 Maestro Proposed Execution Plan (Awaiting HITL Review)
-
-This Pull Request contains an infrastructure change proposed by the **Maestro AI Agent**.
-
-### 🛡️ Human-in-the-Loop (HITL) Governance Gate
-The **HITL governance gate** is enforced by requiring:
-- ✅ Mandatory team review and approval
-- ✅ Policy-as-Code validation (Phase 2, future enhancement)
-- ✅ Security scanning and compliance checks
-
-**⚠️ IMPORTANT:** This PR contains a Terraform plan only. No infrastructure changes have been applied yet.
-
-### 📋 Review Checklist
-- [ ] Verify that the proposed changes align with the intended modifications
-- [ ] Check for unexpected resource deletions or modifications
-- [ ] Validate security scan results
-- [ ] Ensure compliance with organizational policies
-- [ ] Confirm cost implications are acceptable
-
-${securitySection}
-
-### 📊 Terraform Plan Output
-
-<details>
-<summary>Click to expand full Terraform plan</summary>
-
-\`\`\`hcl
-${planText}
-\`\`\`
-
-</details>
-
----
-
-### 📍 Workflow Information
-- **Triggered by:** ${{ github.actor }}
-- **Source Branch:** ${branchName}
-- **Target Branch:** ${targetBranch}
-- **Workflow Run:** [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-- **Commit:** ${{ github.sha }}
-
-### 🚀 Next Steps
-1. Review the Terraform plan above
-2. Approve this PR if changes are correct
-3. Merge this PR to trigger the deployment workflow (Phase 2)
-4. Monitor the deployment for any issues
-
----
-*This PR was automatically generated by Maestro GitOps Workflow*
-*Artifact Contract Version: 1.0*
-*Working Directory: \`iac/maestro-artifacts/terraform/\`*
-`;
+            const body = `## Maestro Proposed Execution Plan (Awaiting HITL Review)\n\n` +
+              `This Pull Request contains an infrastructure change proposed by the **Maestro AI Agent**.\n\n` +
+              `### Human-in-the-Loop (HITL) Governance Gate\n` +
+              `The **HITL governance gate** is enforced by requiring:\n` +
+              `- Mandatory team review and approval\n` +
+              `- Policy-as-Code validation (Phase 2, future enhancement)\n` +
+              `- Security scanning and compliance checks\n\n` +
+              `**IMPORTANT:** This PR contains a Terraform plan only. No infrastructure changes have been applied yet.\n\n` +
+              `### Review Checklist\n` +
+              `- [ ] Verify that the proposed changes align with the intended modifications\n` +
+              `- [ ] Check for unexpected resource deletions or modifications\n` +
+              `- [ ] Validate security scan results\n` +
+              `- [ ] Ensure compliance with organizational policies\n` +
+              `- [ ] Confirm cost implications are acceptable\n` +
+              securitySection + `\n` +
+              `### Terraform Plan Output\n\n` +
+              `<details>\n` +
+              `<summary>Click to expand full Terraform plan</summary>\n\n` +
+              `\`\`\`hcl\n${planText}\n\`\`\`\n\n` +
+              `</details>\n\n` +
+              `---\n\n` +
+              `### Workflow Information\n` +
+              `- **Triggered by:** ${context.actor}\n` +
+              `- **Source Branch:** ${branchName}\n` +
+              `- **Target Branch:** ${targetBranch}\n` +
+              `- **Workflow Run:** [View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n` +
+              `- **Commit:** ${context.sha}\n\n` +
+              `### Next Steps\n` +
+              `1. Review the Terraform plan above\n` +
+              `2. Approve this PR if changes are correct\n` +
+              `3. Merge this PR to trigger the deployment workflow (Phase 2)\n` +
+              `4. Monitor the deployment for any issues\n\n` +
+              `---\n` +
+              `*This PR was automatically generated by Maestro GitOps Workflow*\n` +
+              `*Artifact Contract Version: 1.0*\n` +
+              `*Working Directory: \`terraform/\`*`;
 
             try {
               // Check if PR already exists
@@ -321,3 +333,4 @@ ${planText}
           echo "- This workflow only generates a plan and creates a PR" >> $GITHUB_STEP_SUMMARY
           echo "- Deployment requires manual PR approval and merge" >> $GITHUB_STEP_SUMMARY
           echo "- All changes must pass HITL governance gates" >> $GITHUB_STEP_SUMMARY
+# Trigger workflow with latest fixes

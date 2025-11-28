@@ -60,7 +60,10 @@
       "Bash(gcloud storage buckets:*)",
       "Bash(gh variable:*)",
       "Bash(gcloud iam workload-identity-pools providers describe:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(yamllint:*)",
+      "Bash(git branch:*)",
+      "Bash(powershell.exe -NoProfile -Command \"Get-Content provision-telegram-bot.ps1 -Raw | Out-File -FilePath temp-check.ps1 -Encoding UTF8; try { $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content temp-check.ps1 -Raw), [ref]$null); Write-Host ''No syntax errors found'' } catch { Write-Host \"\"Error: $_\"\" }; Remove-Item temp-check.ps1 -ErrorAction SilentlyContinue\")"
     ],
     "deny": [],
     "ask": []

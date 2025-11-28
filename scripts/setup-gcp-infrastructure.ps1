@@ -188,7 +188,7 @@ Write-Host "  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/$PROJECT_NUMBER/locations
 Write-Host "  GCP_SERVICE_ACCOUNT: $stagingSA"
 Write-Host "  GCP_PROJECT_ID: $PROJECT_ID"
 Write-Host ""
-Write-Host "For production environment (reuse existing 'project-maestro-gcp'):" -ForegroundColor Yellow
+Write-Host "For production environment (reuse existing 'gen-lang-client-0805519538'):" -ForegroundColor Yellow
 Write-Host "  Copy secrets from existing environment"
 Write-Host ""
 Write-Host "Environment variables (all environments):" -ForegroundColor Yellow
