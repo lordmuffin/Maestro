@@ -21,7 +21,7 @@
 #
 # DIRECTORY STRUCTURE CHANGED:
 # - Old: ./terraform
-# - New: iac/maestro-artifacts/terraform
+# - New: terraform
 #
 # LAST DISABLED: 2025-11-26
 # REASON: GitOps Phase 1 - Secure HITL implementation
@@ -34,13 +34,13 @@ on:
     branches:
       - main
     paths:
-      - 'iac/maestro-artifacts/terraform/**'
+      - 'terraform/**'
       - '.github/workflows/terraform.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'iac/maestro-artifacts/terraform/**'
+      - 'terraform/**'
       - '.github/workflows/terraform.yml'
   workflow_dispatch:
     inputs:
@@ -56,7 +56,7 @@ on:
 
 env:
   TERRAFORM_VERSION: '1.6.0'
-  WORKING_DIR: 'iac/maestro-artifacts/terraform'  # Updated from './terraform'
+  WORKING_DIR: 'terraform'  # Updated from './terraform'
   TERRAFORM_STATE_BUCKET: ${{ vars.TERRAFORM_STATE_BUCKET }}
   # Terraform variables - centralized configuration
   TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
@@ -282,7 +282,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: iac/maestro-artifacts/terraform  # Updated from ./terraform
+        working-directory: terraform  # Updated from ./terraform
 
     steps:
       - name: Checkout code
@@ -291,13 +291,13 @@ jobs:
       - name: Run tfsec
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
-          working_directory: iac/maestro-artifacts/terraform  # Updated from terraform
+          working_directory: terraform  # Updated from terraform
           soft_fail: true
 
       - name: Run Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
-          directory: iac/maestro-artifacts/terraform  # Updated from terraform
+          directory: terraform  # Updated from terraform
           framework: terraform
           soft_fail: true
           output_format: cli
