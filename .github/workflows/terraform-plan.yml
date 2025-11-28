@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, develop]
     paths:
-      - 'iac/maestro-artifacts/terraform/**'
+      - 'terraform/**'
       - '.github/workflows/terraform-*.yml'
 
 permissions:
@@ -14,7 +14,7 @@ permissions:
 
 env:
   TERRAFORM_VERSION: '1.6.0'
-  WORKING_DIR: './iac/maestro-artifacts/terraform'
+  WORKING_DIR: './terraform'
 
 jobs:
   code-quality:
@@ -45,7 +45,7 @@ jobs:
       - name: Checkov Security Scan
         uses: bridgecrewio/checkov-action@v12
         with:
-          directory: iac/maestro-artifacts/terraform
+          directory: terraform
           framework: terraform
           soft_fail: true  # Report issues but don't block deployment
           output_format: cli
@@ -54,7 +54,7 @@ jobs:
       - name: tfsec Security Scan
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
-          working_directory: iac/maestro-artifacts/terraform
+          working_directory: terraform
           soft_fail: true  # Report issues but don't block deployment
 
   terraform-plan:
@@ -146,7 +146,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan-${{ steps.target_env.outputs.environment }}-pr-${{ github.event.pull_request.number }}
-          path: iac/maestro-artifacts/terraform/tfplan
+          path: terraform/tfplan
           retention-days: 30
 
       - name: Generate Plan Summary
