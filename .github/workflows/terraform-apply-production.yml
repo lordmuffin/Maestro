@@ -139,27 +139,21 @@ jobs:
         run: |
           echo "❌ Apply failed - initiating automatic rollback"
 
-          # Get previous state version from GCS
-          BUCKET="${{ vars.TERRAFORM_STATE_BUCKET }}"
-          PREFIX="terraform/state/${{ env.ENVIRONMENT }}/default.tfstate"
+          BACKUP_FILE="${{ steps.backup.outputs.backup_file }}"
 
-          # List state versions and get the second most recent (previous version)
-          gsutil ls -a "gs://${BUCKET}/${PREFIX}" | tail -2 | head -1 > previous_state.txt
-          PREVIOUS_STATE=$(cat previous_state.txt)
-
-          if [ -n "$PREVIOUS_STATE" ]; then
-            echo "Restoring state from: $PREVIOUS_STATE"
-            gsutil cp "$PREVIOUS_STATE" rollback_state.json
-            terraform state push rollback_state.json
-            echo "✅ Rollback complete - state restored to previous version"
+          if [ -f "$BACKUP_FILE" ]; then
+            echo "Restoring state from backup: $BACKUP_FILE"
+            terraform state push "$BACKUP_FILE"
+            echo "✅ Rollback complete - state restored to pre-deployment version"
 
             # Log rollback details
             echo "Rollback Details:" >> rollback.log
             echo "Failed commit: ${{ github.sha }}" >> rollback.log
-            echo "Backup file: ${{ steps.backup.outputs.backup_file }}" >> rollback.log
-            echo "Restored state: $PREVIOUS_STATE" >> rollback.log
+            echo "Backup file: $BACKUP_FILE" >> rollback.log
+            echo "Restored successfully" >> rollback.log
           else
-            echo "⚠️ No previous state version found - cannot rollback"
+            echo "⚠️ No backup file found - cannot rollback automatically"
+            echo "Manual intervention may be required"
           fi
 
           exit 1

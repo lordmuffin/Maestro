@@ -56,8 +56,10 @@ jobs:
         id: backup
         working-directory: ${{ env.WORKING_DIR }}
         run: |
-          terraform state pull > state-backup-$(date +%Y%m%d-%H%M%S).json
-          echo "State backed up successfully"
+          BACKUP_FILE="state-backup-$(date +%Y%m%d-%H%M%S).json"
+          terraform state pull > "$BACKUP_FILE"
+          echo "backup_file=$BACKUP_FILE" >> $GITHUB_OUTPUT
+          echo "State backed up successfully to: $BACKUP_FILE"
 
       - name: Terraform Plan
         working-directory: ${{ env.WORKING_DIR }}
@@ -107,21 +109,15 @@ jobs:
         run: |
           echo "❌ Apply failed - initiating automatic rollback"
 
-          # Get previous state version from GCS
-          BUCKET="${{ vars.TERRAFORM_STATE_BUCKET }}"
-          PREFIX="terraform/state/${{ env.ENVIRONMENT }}/default.tfstate"
+          BACKUP_FILE="${{ steps.backup.outputs.backup_file }}"
 
-          # List state versions and get the second most recent (previous version)
-          gsutil ls -a "gs://${BUCKET}/${PREFIX}" | tail -2 | head -1 > previous_state.txt
-          PREVIOUS_STATE=$(cat previous_state.txt)
-
-          if [ -n "$PREVIOUS_STATE" ]; then
-            echo "Restoring state from: $PREVIOUS_STATE"
-            gsutil cp "$PREVIOUS_STATE" rollback_state.json
-            terraform state push rollback_state.json
-            echo "✅ Rollback complete"
+          if [ -f "$BACKUP_FILE" ]; then
+            echo "Restoring state from backup: $BACKUP_FILE"
+            terraform state push "$BACKUP_FILE"
+            echo "✅ Rollback complete - state restored to pre-deployment version"
           else
-            echo "⚠️ No previous state version found - cannot rollback"
+            echo "⚠️ No backup file found - cannot rollback automatically"
+            echo "Manual intervention may be required"
           fi
 
           exit 1

@@ -179,6 +179,7 @@ jobs:
         env:
           PLAN_DETAILS: ${{ steps.summary.outputs.details }}
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const env = '${{ steps.target_env.outputs.environment }}';
             const status = '${{ steps.summary.outputs.status }}';
