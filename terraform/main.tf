@@ -248,6 +248,12 @@ resource "google_project_iam_member" "logging_writer" {
   member  = "serviceAccount:${google_service_account.function_sa.email}"
 }
 
+resource "google_project_iam_member" "logging_viewer" {
+  project = var.gcp_project
+  role    = "roles/logging.viewer"
+  member  = "serviceAccount:${google_service_account.function_sa.email}"
+}
+
 # Google Drive Access:
 # Note: Drive access is granted by sharing specific Drive folders with the service account.
 # There is no project-level IAM role for Drive access. Instead:
