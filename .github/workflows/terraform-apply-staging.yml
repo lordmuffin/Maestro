@@ -4,7 +4,7 @@ on:
   push:
     branches: [develop]
     paths:
-      - 'iac/maestro-artifacts/terraform/**'
+      - 'terraform/**'
       - '.github/workflows/terraform-apply-staging.yml'
 
 permissions:
@@ -14,7 +14,7 @@ permissions:
 
 env:
   TERRAFORM_VERSION: '1.6.0'
-  WORKING_DIR: './iac/maestro-artifacts/terraform'
+  WORKING_DIR: './terraform'
   ENVIRONMENT: 'staging'
 
 jobs:
