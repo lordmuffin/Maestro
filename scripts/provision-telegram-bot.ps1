@@ -1013,12 +1013,20 @@ function Get-TerraformFunctionUrl {
         $workspaces = terraform workspace list 2>&1
         if ($workspaces -notmatch $TargetEnvironment) {
             Write-Log -Level Warning -Message "Terraform workspace '$TargetEnvironment' doesn't exist"
-            Write-Host "   This is expected if environment hasn't been deployed yet" -ForegroundColor Gray
-            return $null
-        }
 
-        # Select workspace
-        terraform workspace select $TargetEnvironment 2>&1 | Out-Null
+            # Prompt user to create workspace locally if they want to try reading state
+            Write-Host "⚠️  Workspace '$TargetEnvironment' not found locally." -ForegroundColor Yellow
+            if (Confirm-Action "Create local workspace '$TargetEnvironment' to read remote state?" -DefaultYes:$true) {
+                Write-Host "Creating workspace..." -ForegroundColor Cyan
+                terraform workspace new $TargetEnvironment 2>&1 | Out-Null
+            } else {
+                Write-Host "   Skipping workspace creation. Cannot retrieve function URL." -ForegroundColor Gray
+                return $null
+            }
+        } else {
+             # Select workspace if it already exists
+             terraform workspace select $TargetEnvironment 2>&1 | Out-Null
+        }
 
         if ($LASTEXITCODE -ne 0) {
             Write-Log -Level Warning -Message "Failed to select workspace"
