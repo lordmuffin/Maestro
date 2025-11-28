@@ -61,11 +61,17 @@
       "Bash(gh variable:*)",
       "Bash(gcloud iam workload-identity-pools providers describe:*)",
 <<<<<<< HEAD
+<<<<<<< HEAD
       "Bash(git commit:*)"
 =======
       "Bash(git commit:*)",
       "Bash(yamllint:*)"
 >>>>>>> origin/develop
+=======
+      "Bash(git commit:*)",
+      "Bash(yamllint:*)",
+      "Bash(git branch:*)"
+>>>>>>> develop
     ],
     "deny": [],
     "ask": []

@@ -142,16 +142,16 @@ Value: (leave empty for now - will be populated after first deployment)
 
 **Environment Secrets** (Click "Add secret"):
 
-Copy ALL secrets from the existing `project-maestro-gcp` environment, OR use the same values as staging:
+Copy ALL secrets from the existing `gen-lang-client-0805519538` environment, OR use the same values as staging:
 
 ```
 Name: GCP_WORKLOAD_IDENTITY_PROVIDER
-Value: (use existing production WIF provider - check existing 'project-maestro-gcp' environment)
+Value: (use existing production WIF provider - check existing 'gen-lang-client-0805519538' environment)
 ```
 
 ```
 Name: GCP_SERVICE_ACCOUNT
-Value: (use existing production SA - check existing 'project-maestro-gcp' environment)
+Value: (use existing production SA - check existing 'gen-lang-client-0805519538' environment)
 ```
 
 ```

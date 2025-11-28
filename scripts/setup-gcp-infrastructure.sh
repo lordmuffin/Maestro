@@ -4,7 +4,7 @@
 #
 # Prerequisites:
 # - gcloud CLI installed and authenticated
-# - Project: project-maestro-gcp
+# - Project: gen-lang-client-0805519538
 # - User must have Project IAM Admin role
 
 set -e  # Exit on any error

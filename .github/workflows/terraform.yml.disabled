@@ -80,7 +80,7 @@ jobs:
     name: 'Terraform ${{ github.event_name == ''pull_request'' && ''Plan'' || github.event.inputs.action || ''Apply'' }}'
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.event_name == 'pull_request' && 'terraform-plan' || 'project-maestro-gcp' }}
+      name: ${{ github.event_name == 'pull_request' && 'terraform-plan' || 'gen-lang-client-0805519538' }}
       url: ${{ steps.outputs.outputs.function_url }}
 
     defaults:

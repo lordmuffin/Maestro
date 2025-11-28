@@ -131,32 +131,32 @@ data "archive_file" "function_source" {
 
   # Include prompt files
   source {
-    content  = file("${path.module}/../prompts/telegram_chat_prompt.md")
+    content  = file("${path.module}/../../../prompts/telegram_chat_prompt.md")
     filename = "prompts/telegram_chat_prompt.md"
   }
 
   source {
-    content  = file("${path.module}/../prompts/multimodal_analysis_prompt.md")
+    content  = file("${path.module}/../../../prompts/multimodal_analysis_prompt.md")
     filename = "prompts/multimodal_analysis_prompt.md"
   }
 
   source {
-    content  = file("${path.module}/../prompts/transcript_analysis_prompt.md")
+    content  = file("${path.module}/../../../prompts/transcript_analysis_prompt.md")
     filename = "prompts/transcript_analysis_prompt.md"
   }
 
   source {
-    content  = file("${path.module}/../prompts/interrogation_questions_prompt.md")
+    content  = file("${path.module}/../../../prompts/interrogation_questions_prompt.md")
     filename = "prompts/interrogation_questions_prompt.md"
   }
 
   source {
-    content  = file("${path.module}/../prompts/interviewer_prompt.md")
+    content  = file("${path.module}/../../../prompts/interviewer_prompt.md")
     filename = "prompts/interviewer_prompt.md"
   }
 
   source {
-    content  = file("${path.module}/../prompts/file_validation_prompt.md")
+    content  = file("${path.module}/../../../prompts/file_validation_prompt.md")
     filename = "prompts/file_validation_prompt.md"
   }
 

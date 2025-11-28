@@ -1,11 +1,16 @@
 # Maestro: AI Executive Assistant
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 A unified, privacy-first AI platform combining advanced conversational intelligence with deep workflow automation.
+=======
+A unified, privacy-first AI platform combining advanced conversational intelligence with deep workflow automation and GitOps infrastructure management.
+>>>>>>> develop
 
-## 🚀 Current Status: Phase 4 Implementation
+## 🚀 Current Status: Phase 4 Implementation + Infrastructure Automation
 
 **Phase 4: Platform & Ecosystem** - Unified EA Skills Framework with multi-LLM support
+<<<<<<< HEAD
 =======
 A unified, privacy-first AI platform combining advanced conversational intelligence with deep workflow automation and GitOps infrastructure management.
 
@@ -14,6 +19,9 @@ A unified, privacy-first AI platform combining advanced conversational intellige
 **Phase 4: Platform & Ecosystem** - Unified EA Skills Framework with multi-LLM support
 **Infrastructure**: Enterprise-grade GitOps workflows with multi-environment deployment pipeline
 >>>>>>> origin/develop
+=======
+**Infrastructure**: Enterprise-grade GitOps workflows with multi-environment deployment pipeline
+>>>>>>> develop
 
 ---
 
@@ -35,7 +43,10 @@ A unified, privacy-first AI platform combining advanced conversational intellige
 - **Docker Stack**: Fully containerized with PostgreSQL and Ollama
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> develop
 ### GitOps Infrastructure (New)
 - **Multi-Environment Pipeline**: Automated staging → production deployment workflow
 - **GitHub Integration**: Automated PR creation for sessions, transcripts, and interviews
@@ -45,7 +56,10 @@ A unified, privacy-first AI platform combining advanced conversational intellige
 - **Manual Approval Gates**: Production deployments require explicit approval
 - **Drift Detection**: Automated weekly infrastructure drift monitoring
 
+<<<<<<< HEAD
 >>>>>>> origin/develop
+=======
+>>>>>>> develop
 ### Quick Start
 
 #### Linux/macOS
@@ -287,7 +301,10 @@ Maestro uses a "Tri-Hybrid" architecture:
 - **generate_project_synthesis** - Generate project overviews
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> develop
 #### GitHub Integration (Infrastructure)
 - **Automated PR Creation**: Creates pull requests for:
   - AI conversation sessions
@@ -296,14 +313,20 @@ Maestro uses a "Tri-Hybrid" architecture:
 - **Branch Sanitization**: Automatic Git ref validation with comprehensive character handling
 - **Multi-Repository Support**: Route content to different repositories based on type
 
+<<<<<<< HEAD
 >>>>>>> origin/develop
+=======
+>>>>>>> develop
 #### Health & Status
 - `GET /health` - Basic health check
 - `GET /health/detailed` - Detailed component status
 - `GET /` - API information
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> develop
 ## GitOps & Infrastructure
 
 ### GitHub Actions Workflows
@@ -341,7 +364,10 @@ The GitHub integration includes robust branch name sanitization:
 
 See [GITOPS_SETUP_GUIDE.md](docs/GITOPS_SETUP_GUIDE.md) for detailed setup instructions.
 
+<<<<<<< HEAD
 >>>>>>> origin/develop
+=======
+>>>>>>> develop
 ### Development Roadmap
 
 - ✅ **Phase 1** (Weeks 1-6): Local-First Knowledge Core
@@ -372,7 +398,10 @@ See [GITOPS_SETUP_GUIDE.md](docs/GITOPS_SETUP_GUIDE.md) for detailed setup instr
   - Built-in skills (weekly review, search, tasks, synthesis)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> develop
 - 🚀 **Infrastructure Automation** (Ongoing)
   - GitHub Actions workflows for Terraform
   - Multi-environment deployment pipeline (staging, production)
@@ -381,11 +410,15 @@ See [GITOPS_SETUP_GUIDE.md](docs/GITOPS_SETUP_GUIDE.md) for detailed setup instr
   - Security scanning with tfsec
   - Drift detection and monitoring
 
+<<<<<<< HEAD
 >>>>>>> origin/develop
+=======
+>>>>>>> develop
 ### Project Structure
 
 ```
 maestro/
+<<<<<<< HEAD
 <<<<<<< HEAD
 ├── backend/           # FastAPI backend
 │   ├── core/         # Core modules (RAG, models, database)
@@ -413,6 +446,17 @@ maestro/
 ├── frontend/                      # Open WebUI customizations
 ├── infra/                         # Docker infrastructure
 │   ├── docker-compose.yml
+=======
+├── backend/                        # FastAPI backend
+│   ├── core/                      # Core modules (RAG, models, database)
+│   ├── api/                       # API routes
+│   ├── services/                  # Business logic services (path_mapping, etc.)
+│   ├── integrations/              # External integrations (Google Drive, Gemini)
+│   └── tests/                     # Unit and integration tests
+├── frontend/                      # Open WebUI customizations
+├── infra/                         # Docker infrastructure
+│   ├── docker-compose.yml
+>>>>>>> develop
 │   └── docker/                    # Dockerfiles
 ├── iac/                           # Infrastructure as Code
 │   └── maestro-artifacts/
@@ -437,7 +481,10 @@ maestro/
     ├── guides/                    # User guides and tutorials
     ├── GITOPS_SETUP_GUIDE.md      # GitOps configuration guide
     └── GITOPS_IMPLEMENTATION.md   # GitOps implementation details
+<<<<<<< HEAD
 >>>>>>> origin/develop
+=======
+>>>>>>> develop
 ```
 
 ### License
