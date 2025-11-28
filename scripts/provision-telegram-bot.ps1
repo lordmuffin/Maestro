@@ -999,6 +999,58 @@ function Register-TelegramWebhook {
 
 #region Module 5: Webhook & Function Management
 
+function Initialize-TerraformState {
+    param([string]$TargetEnvironment)
+
+    Write-Log -Level Info -Message "Initializing Terraform state connection..."
+
+    # 1. Check if backend is configured
+    if (-not (Test-Path ".terraform")) {
+        Write-Host "⚠️  Terraform backend not initialized." -ForegroundColor Yellow
+
+        # Try to get bucket from GitHub Variable
+        $bucket = $null
+        try {
+            $bucket = gh variable get TERRAFORM_STATE_BUCKET --env $TargetEnvironment 2>&1
+            if ($LASTEXITCODE -eq 0 -and $bucket) {
+                Write-Host "✅ Found state bucket: $bucket" -ForegroundColor Green
+            }
+        } catch {}
+
+        if (-not $bucket) {
+            $bucket = Read-Host "Enter Terraform State Bucket Name (e.g., project-tfstate)"
+        }
+
+        if (-not $bucket) {
+            Write-Log -Level Error -Message "No state bucket provided"
+            return $false
+        }
+
+        Write-Host "Initializing Terraform..." -ForegroundColor Cyan
+        terraform init `
+            -backend-config="bucket=$bucket" `
+            -backend-config="prefix=terraform/state/$TargetEnvironment" `
+            2>&1 | Out-Null
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log -Level Error -Message "Terraform init failed"
+            return $false
+        }
+    }
+
+    # 2. Manage Workspace
+    $workspaces = terraform workspace list 2>&1
+    if ($workspaces -notmatch $TargetEnvironment) {
+        Write-Host "Creating workspace '$TargetEnvironment'..." -ForegroundColor Cyan
+        terraform workspace new $TargetEnvironment 2>&1 | Out-Null
+    } else {
+        Write-Host "Selecting workspace '$TargetEnvironment'..." -ForegroundColor Cyan
+        terraform workspace select $TargetEnvironment 2>&1 | Out-Null
+    }
+
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Get-TerraformFunctionUrl {
     param([string]$TargetEnvironment)
 
@@ -1009,19 +1061,9 @@ function Get-TerraformFunctionUrl {
 
     Push-Location $TERRAFORM_DIR
     try {
-        # Check workspace exists
-        $workspaces = terraform workspace list 2>&1
-        if ($workspaces -notmatch $TargetEnvironment) {
-            Write-Log -Level Warning -Message "Terraform workspace '$TargetEnvironment' doesn't exist"
-            Write-Host "   This is expected if environment hasn't been deployed yet" -ForegroundColor Gray
-            return $null
-        }
-
-        # Select workspace
-        terraform workspace select $TargetEnvironment 2>&1 | Out-Null
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log -Level Warning -Message "Failed to select workspace"
+        # Initialize connection to remote state
+        if (-not (Initialize-TerraformState -TargetEnvironment $TargetEnvironment)) {
+            Write-Host "⚠️  Failed to connect to Terraform state." -ForegroundColor Yellow
             return $null
         }
 
