@@ -12,7 +12,7 @@ permissions:
 
 env:
   TERRAFORM_VERSION: '1.6.0'
-  WORKING_DIR: './iac/maestro-artifacts/terraform'
+  WORKING_DIR: './terraform'
 
 jobs:
   detect-drift:
