@@ -431,6 +431,42 @@ class FirestoreManager:
             logger.error(f"Error completing interviewer session: {e}")
             raise
 
+    @staticmethod
+    def set_user_state(user_id: int, state_data: Dict[str, Any]) -> None:
+        """Set a temporary state for a user (e.g., waiting for edit)."""
+        try:
+            state_ref = get_db().collection('user_states').document(str(user_id))
+            state_data['updated_at'] = firestore.SERVER_TIMESTAMP
+            state_ref.set(state_data)
+            logger.info(f"Set user state for {user_id}: {state_data.get('action')}")
+        except Exception as e:
+            logger.error(f"Error setting user state: {e}")
+            raise
+
+    @staticmethod
+    def get_user_state(user_id: int) -> Optional[Dict[str, Any]]:
+        """Retrieve user state."""
+        try:
+            state_ref = get_db().collection('user_states').document(str(user_id))
+            doc = state_ref.get()
+            if doc.exists:
+                return doc.to_dict()
+            return None
+        except Exception as e:
+            logger.error(f"Error retrieving user state: {e}")
+            return None
+
+    @staticmethod
+    def delete_user_state(user_id: int) -> None:
+        """Delete user state."""
+        try:
+            state_ref = get_db().collection('user_states').document(str(user_id))
+            state_ref.delete()
+            logger.info(f"Deleted user state for {user_id}")
+        except Exception as e:
+            logger.error(f"Error deleting user state: {e}")
+            raise
+
 
 class GoogleDriveClient:
     """Handles Google Drive operations for transcript monitoring."""
@@ -1668,6 +1704,101 @@ class GitHubManager:
 
         return "\n".join(lines)
 
+    def create_pr_from_validated_file(self,
+                                      filename: str,
+                                      content: str,
+                                      metadata: Dict[str, Any],
+                                      repo_label: Optional[str] = None,
+                                      repo_name: Optional[str] = None) -> str:
+        """
+        Create a PR for a single validated file (e.g. image/video analysis).
+
+        Args:
+            filename: Original filename
+            content: Validated structured notes
+            metadata: File metadata
+            repo_label: Target repository label
+            repo_name: Target repository name
+
+        Returns:
+            PR URL
+        """
+        try:
+            # Determine target repository (use 'transcripts' operation for consistency)
+            repo_config = self._get_repo_for_operation('transcripts', repo_label, repo_name)
+            repo = repo_config.get_repo()
+
+            logger.info(f"Creating validated file PR in repository: {repo_config.name}")
+
+            # Generate branch name
+            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            safe_filename = self._sanitize_git_ref_name(filename, max_length=30)
+            branch_name = f"upload/{safe_filename}-{timestamp}"
+
+            # Get default branch
+            default_branch = repo.default_branch
+            source = repo.get_branch(default_branch)
+
+            # Create new branch
+            repo.create_git_ref(
+                ref=f"refs/heads/{branch_name}",
+                sha=source.commit.sha
+            )
+            logger.info(f"Created branch: {branch_name}")
+
+            # Format as markdown
+            date_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            markdown_content = f"# {filename}\n\n"
+            markdown_content += f"**Date**: {date_str} UTC\n"
+            markdown_content += f"**Source**: Telegram Upload\n"
+            markdown_content += f"**File Type**: {metadata.get('file_type', 'Unknown')}\n\n"
+            markdown_content += "---\n\n"
+            markdown_content += f"{content}\n\n"
+            markdown_content += "---\n\n"
+            markdown_content += "## Metadata\n"
+            markdown_content += f"- **Original Filename**: {filename}\n"
+            markdown_content += f"- **Session ID**: {metadata.get('session_id', 'N/A')}\n"
+            markdown_content += f"- **Validated At**: {metadata.get('validated_at', 'N/A')}\n"
+
+            # Get path from config or use default
+            base_path = repo_config.paths.get('transcripts', 'transcripts/')
+
+            # Create filename for repo
+            safe_base_name = self._sanitize_filename(filename.rsplit('.', 1)[0], max_length=100)
+            file_path = f"{base_path}{datetime.now().strftime('%Y-%m-%d')}-{safe_base_name}.md"
+
+            # Commit file
+            repo.create_file(
+                path=file_path,
+                message=f"Add validated notes: {filename}",
+                content=markdown_content,
+                branch=branch_name
+            )
+            logger.info(f"Committed file: {file_path}")
+
+            # Create PR
+            pr_body = f"## 📝 New Content Processed\n\n"
+            pr_body += f"**File**: `{filename}`\n"
+            pr_body += f"**Source**: Telegram Upload\n"
+            pr_body += f"**Processed**: {date_str} UTC\n\n"
+            pr_body += "### 🔍 Structured Notes\n\n"
+            pr_body += f"{content[:1000]}...\n\n"
+            pr_body += "---\n\n"
+            pr_body += "🤖 Generated by V2V2B Interrogator"
+
+            pr = repo.create_pull(
+                title=f"📋 Content Analysis: {filename}",
+                body=pr_body,
+                head=branch_name,
+                base=default_branch
+            )
+            logger.info(f"Created PR in {repo_config.name}: {pr.html_url}")
+
+            return pr.html_url
+        except Exception as e:
+            logger.error(f"Error creating validated file PR: {e}", exc_info=True)
+            raise
+
     def _format_history_as_markdown(self, session_id: str, history: List[Dict[str, str]]) -> str:
         """Format session history as markdown."""
         lines = [
@@ -2855,6 +2986,7 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
             keyboard = [
                 [
                     InlineKeyboardButton("✅ Validate & Save", callback_data=f"validate:{validation_id}"),
+                    InlineKeyboardButton("✏️ Edit", callback_data=f"edit:{validation_id}"),
                     InlineKeyboardButton("❌ Reject", callback_data=f"reject:{validation_id}")
                 ]
             ]
@@ -2900,12 +3032,43 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
                 return self._handle_validation_approve(query_id, chat_id, pending)
             elif action == 'reject':
                 return self._handle_validation_reject(query_id, chat_id, pending)
+            elif action == 'edit':
+                return self._handle_validation_edit_request(query_id, chat_id, user_id, pending)
             else:
                 logger.error(f"Unknown callback action: {action}")
                 return {'status': 'error'}
 
         except Exception as e:
             logger.error(f"Error handling callback query: {e}", exc_info=True)
+            return {'status': 'error'}
+
+    def _handle_validation_edit_request(self, query_id: str, chat_id: int, user_id: int, pending: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle edit request - set user state to waiting for input."""
+        try:
+            validation_id = pending['validation_id']
+            filename = pending['filename']
+
+            # Answer callback
+            self.telegram_client.answer_callback_query(query_id, "✏️ Edit mode enabled")
+
+            # Set user state
+            FirestoreManager.set_user_state(user_id, {
+                'action': 'edit_validation',
+                'validation_id': validation_id,
+                'chat_id': chat_id,
+                'filename': filename
+            })
+
+            # Prompt user
+            msg = f"✏️ **Editing: {filename}**\n\n"
+            msg += "Please reply to this message with the updated structured notes text.\n"
+            msg += "Whatever you send next will replace the current notes."
+
+            self.telegram_client.send_message(chat_id, msg)
+            return {'status': 'ok'}
+        except Exception as e:
+            logger.error(f"Error handling edit request: {e}", exc_info=True)
+            self.telegram_client.safe_send_error(chat_id, e, context="enabling edit mode")
             return {'status': 'error'}
 
     def _handle_validation_approve(self, query_id: str, chat_id: int, pending: Dict[str, Any]) -> Dict[str, Any]:
@@ -2955,14 +3118,27 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
             # Delete pending validation
             FirestoreManager.delete_pending_validation(validation_id)
 
+            # Create GitHub PR immediately
+            self.telegram_client.send_message(chat_id, "🚀 Creating Pull Request...", parse_mode=None)
+
+            pr_url = self.github_manager.create_pr_from_validated_file(
+                filename=filename,
+                content=structured_notes,
+                metadata={
+                    'session_id': session_id,
+                    'validated_at': datetime.utcnow().isoformat(),
+                    'file_type': 'image/video'
+                }
+            )
+
             # Send success message
-            success_msg = f"✅ *Successfully saved!*\n\n"
+            success_msg = f"✅ *Successfully saved and PR created!*\n\n"
             success_msg += f"📁 File: `{filename}`\n"
             success_msg += f"💾 Indexed in knowledge base\n"
-            success_msg += f"📝 Added to session history\n\n"
-            success_msg += f"Use /done to create a PR with this session."
+            success_msg += f"🔗 PR: {pr_url}\n"
 
-            self.telegram_client.send_message(chat_id, success_msg)
+            # Send as plain text if PR URL is present to avoid markdown issues with links
+            self.telegram_client.send_message(chat_id, success_msg, parse_mode=None)
 
             return {'status': 'ok'}
 
@@ -2995,6 +3171,42 @@ PROCEED TO PHASE 3: FINALIZATION. Generate the complete structured notes in Obsi
         except Exception as e:
             logger.error(f"Error rejecting validation: {e}", exc_info=True)
             self.telegram_client.send_message(chat_id, f'❌ Error rejecting file: {str(e)}')
+            return {'status': 'error'}
+
+    def _handle_validation_edit_submission(self, user_id: int, chat_id: int, new_content: str, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Process the new content submitted by user in edit mode."""
+        try:
+            validation_id = state['validation_id']
+            filename = state['filename']
+
+            # Update pending validation in Firestore
+            validation_ref = get_db().collection('pending_validations').document(validation_id)
+            doc = validation_ref.get()
+
+            if not doc.exists:
+                self.telegram_client.send_message(chat_id, "❌ Original validation request not found. It may have expired.")
+                FirestoreManager.delete_user_state(user_id)
+                return {'status': 'error'}
+
+            # Update structured_notes
+            validation_ref.update({
+                'structured_notes': new_content,
+                'updated_at': firestore.SERVER_TIMESTAMP
+            })
+
+            # Clear user state
+            FirestoreManager.delete_user_state(user_id)
+
+            self.telegram_client.send_message(chat_id, "✅ Content updated.")
+
+            # Re-send validation prompt with new content
+            self._send_validation_prompt(chat_id, filename, new_content, validation_id)
+
+            return {'status': 'ok'}
+
+        except Exception as e:
+            logger.error(f"Error handling validation edit submission: {e}", exc_info=True)
+            self.telegram_client.safe_send_error(chat_id, e, context="updating content")
             return {'status': 'error'}
 
     def _handle_interviewer_response(self, session_id: str, chat_id: int, user_response: str) -> Dict[str, Any]:
@@ -3065,11 +3277,26 @@ Continue the interview process. Ask follow-up clarifying questions if needed, or
     def _handle_chat_message(self, session_id: str, chat_id: int, username: str, message_text: str) -> Dict[str, Any]:
         """Handle regular chat message."""
         try:
-            # Check if interviewer mode is active
+            # 1. Check if user is in a temporary state (e.g. editing notes)
+            # We need the user_id for this. Since we don't have it directly in arguments,
+            # we need to extract it from session_id or parse update again.
+            # Ideally, refactor to pass user_id, but here we can parse session_id 'telegram_{user_id}_{date}'
+            try:
+                parts = session_id.split('_')
+                if len(parts) >= 2 and parts[0] == 'telegram':
+                    user_id = int(parts[1])
+                    user_state = FirestoreManager.get_user_state(user_id)
+
+                    if user_state and user_state.get('action') == 'edit_validation':
+                        return self._handle_validation_edit_submission(user_id, chat_id, message_text, user_state)
+            except Exception as state_error:
+                logger.warning(f"Error checking user state: {state_error}")
+
+            # 2. Check if interviewer mode is active
             if FirestoreManager.is_interviewer_active(session_id):
                 return self._handle_interviewer_response(session_id, chat_id, message_text)
 
-            # Regular chat flow
+            # 3. Regular chat flow
             # Save user message (use chat_id as space_name)
             FirestoreManager.save_message(session_id, 'user', message_text, str(chat_id))
 
