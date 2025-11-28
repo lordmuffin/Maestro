@@ -178,18 +178,29 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const output = `#### Terraform Plan for \`${{ steps.target_env.outputs.environment }}\` Environment
+            const env = '${{ steps.target_env.outputs.environment }}';
+            const status = '${{ steps.summary.outputs.status }}';
+            const tfVersion = '${{ env.TERRAFORM_VERSION }}';
+            const workspace = '${{ steps.target_env.outputs.workspace }}';
+            const configFile = '${{ steps.target_env.outputs.tfvars_file }}';
+            const details = `${{ steps.summary.outputs.details }}`;
+            const baseRef = '${{ github.base_ref }}';
+            const actor = '${{ github.actor }}';
+            const runNumber = '${{ github.run_number }}';
+            const runUrl = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}';
 
-            **Status:** ${{ steps.summary.outputs.status }}
+            const output = `#### Terraform Plan for \`${env}\` Environment
 
-            **Terraform Version:** \`${{ env.TERRAFORM_VERSION }}\`
-            **Workspace:** \`${{ steps.target_env.outputs.workspace }}\`
-            **Config File:** \`${{ steps.target_env.outputs.tfvars_file }}\`
+            **Status:** ${status}
+
+            **Terraform Version:** \`${tfVersion}\`
+            **Workspace:** \`${workspace}\`
+            **Config File:** \`${configFile}\`
 
             <details><summary>📋 Show Plan Details</summary>
 
             \`\`\`terraform
-            ${{ steps.summary.outputs.details }}
+            ${details}
             \`\`\`
 
             </details>
@@ -199,9 +210,9 @@ jobs:
             **Next Steps:**
             1. ✅ Review the plan carefully
             2. ✅ Ensure security scans passed
-            3. ✅ Approve PR to merge to \`${{ github.base_ref }}\`
+            3. ✅ Approve PR to merge to \`${baseRef}\`
 
-            *Pusher: @${{ github.actor }} | Run: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*`;
+            *Pusher: @${actor} | Run: [#${runNumber}](${runUrl})*`;
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,
