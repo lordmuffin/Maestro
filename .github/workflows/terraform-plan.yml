@@ -61,7 +61,7 @@ jobs:
     name: 'Plan Terraform'
     runs-on: ubuntu-latest
     needs: [code-quality]
-    environment: terraform-plan
+    environment: staging
 
     steps:
       - name: Checkout code
