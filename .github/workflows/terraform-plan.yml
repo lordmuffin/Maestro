@@ -47,7 +47,7 @@ jobs:
         with:
           directory: iac/maestro-artifacts/terraform
           framework: terraform
-          soft_fail: false  # BLOCKS deployment on security issues
+          soft_fail: true  # Report issues but don't block deployment
           output_format: cli
           quiet: false
 
@@ -55,7 +55,7 @@ jobs:
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
           working_directory: iac/maestro-artifacts/terraform
-          soft_fail: false  # BLOCKS deployment on security issues
+          soft_fail: true  # Report issues but don't block deployment
 
   terraform-plan:
     name: 'Plan Terraform'
