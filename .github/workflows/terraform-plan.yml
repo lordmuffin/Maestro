@@ -176,6 +176,8 @@ jobs:
       - name: Comment PR with Plan
         if: always()
         uses: actions/github-script@v7
+        env:
+          PLAN_DETAILS: ${{ steps.summary.outputs.details }}
         with:
           script: |
             const env = '${{ steps.target_env.outputs.environment }}';
@@ -183,7 +185,7 @@ jobs:
             const tfVersion = '${{ env.TERRAFORM_VERSION }}';
             const workspace = '${{ steps.target_env.outputs.workspace }}';
             const configFile = '${{ steps.target_env.outputs.tfvars_file }}';
-            const details = `${{ steps.summary.outputs.details }}`;
+            const details = process.env.PLAN_DETAILS;
             const baseRef = '${{ github.base_ref }}';
             const actor = '${{ github.actor }}';
             const runNumber = '${{ github.run_number }}';
