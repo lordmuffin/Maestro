@@ -100,6 +100,13 @@ resource "google_storage_bucket" "function_bucket" {
   force_destroy = true
 
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+
+  versioning {
+    enabled = true
+  }
+
+  # checkov:skip=CKV_GCP_62:Log access not required for temporary deployment artifacts
 
   depends_on = [google_project_service.cloud_functions]
 }
@@ -169,6 +176,8 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
   name        = var.function_name
   location    = var.region
   description = "V2V2B Interrogator - Telegram Bot for Technical Content Extraction"
+
+  # checkov:skip=CKV_GCP_124:Telegram webhook requires public ingress
 
   build_config {
     runtime     = "python311"
@@ -248,6 +257,12 @@ resource "google_project_iam_member" "logging_writer" {
   member  = "serviceAccount:${google_service_account.function_sa.email}"
 }
 
+resource "google_project_iam_member" "logging_viewer" {
+  project = var.gcp_project
+  role    = "roles/logging.viewer"
+  member  = "serviceAccount:${google_service_account.function_sa.email}"
+}
+
 # Google Drive Access:
 # Note: Drive access is granted by sharing specific Drive folders with the service account.
 # There is no project-level IAM role for Drive access. Instead:
@@ -259,6 +274,7 @@ resource "google_project_iam_member" "logging_writer" {
 
 # Allow unauthenticated access to the function (for Telegram webhook)
 resource "google_cloud_run_service_iam_member" "public_access" {
+  # checkov:skip=CKV_GCP_102:Telegram webhook requires public access
   project  = google_cloudfunctions2_function.v2v2b_interrogator.project
   location = google_cloudfunctions2_function.v2v2b_interrogator.location
   service  = google_cloudfunctions2_function.v2v2b_interrogator.name
@@ -272,7 +288,7 @@ resource "google_firebaserules_ruleset" "firestore" {
 
   source {
     files {
-      name = "firestore.rules"
+      name    = "firestore.rules"
       content = file("${path.module}/firestore.rules")
     }
   }
