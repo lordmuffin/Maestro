@@ -61,6 +61,34 @@ jobs:
           echo "backup_file=$BACKUP_FILE" >> $GITHUB_OUTPUT
           echo "State backed up successfully to: $BACKUP_FILE"
 
+      - name: Import Existing Resources
+        working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          echo "🔄 Attempting to import existing resources..."
+
+          # Import Firestore database (ignore errors if doesn't exist or already in state)
+          terraform import \
+            google_firestore_database.database \
+            "projects/${{ secrets.GCP_PROJECT_ID }}/databases/(default)" \
+            2>/dev/null || echo "⚠️ Firestore database not imported (may already be in state or not exist)"
+
+          # Import storage bucket (ignore errors if doesn't exist or already in state)
+          terraform import \
+            google_storage_bucket.function_bucket \
+            "${{ secrets.GCP_PROJECT_ID }}-v2v2b-function-source" \
+            2>/dev/null || echo "⚠️ Storage bucket not imported (may already be in state or not exist)"
+
+          # Import service account (ignore errors if doesn't exist or already in state)
+          terraform import \
+            google_service_account.function_sa \
+            "projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/v2v2b-interrogator-${{ env.ENVIRONMENT }}-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            2>/dev/null || echo "⚠️ Service account not imported (may already be in state or not exist)"
+
+          echo "✅ Import step complete"
+        continue-on-error: true
+
       - name: Terraform Plan
         working-directory: ${{ env.WORKING_DIR }}
         env:
