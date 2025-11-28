@@ -97,6 +97,13 @@ jobs:
             "projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/v2v2b-interrogator-${{ env.ENVIRONMENT }}-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             2>&1 | grep -v "Enter a value" || echo "⚠️ Service account not imported (may already be in state or not exist)"
 
+          # Import Firestore rules release (ignore errors if doesn't exist or already in state)
+          terraform import \
+            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
+            'google_firebaserules_release.firestore[0]' \
+            "projects/${{ secrets.GCP_PROJECT_ID }}/releases/cloud.firestore" \
+            2>&1 | grep -v "Enter a value" || echo "⚠️ Firestore rules release not imported (may already be in state or not exist)"
+
           echo "✅ Import step complete"
         continue-on-error: true
 
