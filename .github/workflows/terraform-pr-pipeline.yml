@@ -97,7 +97,8 @@ jobs:
           # to check for general errors, or defaults if available.
           # Ideally, this should target an environment or use a mock tfvars.
           # For now, providing required variables via env vars is a minimum.
-          terraform plan -no-color -input=false -out=tfplan.binary 2>&1 | tee plan_output.txt
+          # Adding -refresh=false to bypass permission issues with existing resources during plan
+          terraform plan -no-color -input=false -refresh=false -out=tfplan.binary 2>&1 | tee plan_output.txt
 
           # Capture exit code
           EXIT_CODE=${PIPESTATUS[0]}
