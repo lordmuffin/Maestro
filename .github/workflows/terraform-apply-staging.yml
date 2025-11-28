@@ -4,7 +4,7 @@ on:
   push:
     branches: [develop]
     paths:
-      - 'iac/maestro-artifacts/terraform/**'
+      - 'terraform/**'
       - '.github/workflows/terraform-apply-staging.yml'
 
 permissions:
@@ -14,7 +14,7 @@ permissions:
 
 env:
   TERRAFORM_VERSION: '1.6.0'
-  WORKING_DIR: './iac/maestro-artifacts/terraform'
+  WORKING_DIR: './terraform'
   ENVIRONMENT: 'staging'
 
 jobs:
@@ -56,8 +56,70 @@ jobs:
         id: backup
         working-directory: ${{ env.WORKING_DIR }}
         run: |
-          terraform state pull > state-backup-$(date +%Y%m%d-%H%M%S).json
-          echo "State backed up successfully"
+          BACKUP_FILE="state-backup-$(date +%Y%m%d-%H%M%S).json"
+          terraform state pull > "$BACKUP_FILE"
+          echo "backup_file=$BACKUP_FILE" >> $GITHUB_OUTPUT
+          echo "State backed up successfully to: $BACKUP_FILE"
+
+      - name: Import Existing Resources
+        working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TF_VAR_github_tokens: '{"maestro":"${{ secrets.GH_TOKEN_MAESTRO }}","beyond":"${{ secrets.GH_TOKEN_BEYOND }}"}'
+          TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
+          TF_VAR_obsidian_drive_folder_id: ${{ vars.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
+          TF_VAR_kanban_folder_id: ${{ vars.KANBAN_FOLDER_ID || '' }}
+          TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
+          TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
+          TF_VAR_repos_config_file: 'repos.json'
+        run: |
+          echo "🔄 Attempting to import existing resources..."
+
+          # Import Firestore database (ignore errors if doesn't exist or already in state)
+          terraform import \
+            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
+            google_firestore_database.database \
+            "projects/${{ secrets.GCP_PROJECT_ID }}/databases/(default)" \
+            2>&1 | grep -v "Enter a value" || echo "⚠️ Firestore database not imported (may already be in state or not exist)"
+
+          # Import storage bucket (ignore errors if doesn't exist or already in state)
+          terraform import \
+            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
+            google_storage_bucket.function_bucket \
+            "${{ secrets.GCP_PROJECT_ID }}-v2v2b-function-source" \
+            2>&1 | grep -v "Enter a value" || echo "⚠️ Storage bucket not imported (may already be in state or not exist)"
+
+          # Import service account (ignore errors if doesn't exist or already in state)
+          terraform import \
+            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
+            google_service_account.function_sa \
+            "projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/v2v2b-interrogator-${{ env.ENVIRONMENT }}-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            2>&1 | grep -v "Enter a value" || echo "⚠️ Service account not imported (may already be in state or not exist)"
+
+          # Import Firestore rules release (ignore errors if doesn't exist or already in state)
+          terraform import \
+            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
+            'google_firebaserules_release.firestore[0]' \
+            "projects/${{ secrets.GCP_PROJECT_ID }}/releases/cloud.firestore" \
+            2>&1 | grep -v "Enter a value" || echo "⚠️ Firestore rules release not imported (may already be in state or not exist)"
+
+          # Import Cloud Function (ignore errors if doesn't exist or already in state)
+          terraform import \
+            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
+            google_cloudfunctions2_function.v2v2b_interrogator \
+            "projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/functions/v2v2b-interrogator-${{ env.ENVIRONMENT }}" \
+            2>&1 | grep -v "Enter a value" || echo "⚠️ Cloud Function not imported (may already be in state or not exist)"
+
+          # Import Cloud Run IAM member (ignore errors if doesn't exist or already in state)
+          terraform import \
+            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
+            google_cloud_run_service_iam_member.public_access \
+            "v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/services/v2v2b-interrogator-${{ env.ENVIRONMENT }} roles/run.invoker allUsers" \
+            2>&1 | grep -v "Enter a value" || echo "⚠️ Cloud Run IAM member not imported (may already be in state or not exist)"
+
+          echo "✅ Import step complete"
+        continue-on-error: true
 
       - name: Terraform Plan
         working-directory: ${{ env.WORKING_DIR }}
@@ -107,21 +169,15 @@ jobs:
         run: |
           echo "❌ Apply failed - initiating automatic rollback"
 
-          # Get previous state version from GCS
-          BUCKET="${{ vars.TERRAFORM_STATE_BUCKET }}"
-          PREFIX="terraform/state/${{ env.ENVIRONMENT }}/default.tfstate"
+          BACKUP_FILE="${{ steps.backup.outputs.backup_file }}"
 
-          # List state versions and get the second most recent (previous version)
-          gsutil ls -a "gs://${BUCKET}/${PREFIX}" | tail -2 | head -1 > previous_state.txt
-          PREVIOUS_STATE=$(cat previous_state.txt)
-
-          if [ -n "$PREVIOUS_STATE" ]; then
-            echo "Restoring state from: $PREVIOUS_STATE"
-            gsutil cp "$PREVIOUS_STATE" rollback_state.json
-            terraform state push rollback_state.json
-            echo "✅ Rollback complete"
+          if [ -f "$BACKUP_FILE" ]; then
+            echo "Restoring state from backup: $BACKUP_FILE"
+            terraform state push -force "$BACKUP_FILE"
+            echo "✅ Rollback complete - state restored to pre-deployment version"
           else
-            echo "⚠️ No previous state version found - cannot rollback"
+            echo "⚠️ No backup file found - cannot rollback automatically"
+            echo "Manual intervention may be required"
           fi
 
           exit 1
