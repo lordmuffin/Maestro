@@ -113,7 +113,7 @@ jobs:
 
           if [ -f "$BACKUP_FILE" ]; then
             echo "Restoring state from backup: $BACKUP_FILE"
-            terraform state push "$BACKUP_FILE"
+            terraform state push -force "$BACKUP_FILE"
             echo "✅ Rollback complete - state restored to pre-deployment version"
           else
             echo "⚠️ No backup file found - cannot rollback automatically"
