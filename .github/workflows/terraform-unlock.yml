@@ -1,0 +1,116 @@
+name: 'Terraform Unlock'
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'The pull request number that is blocked.'
+        required: true
+        type: string
+
+env:
+  TERRAFORM_VERSION: '1.6.0'
+  WORKING_DIR: './terraform'
+  PR_NUMBER: ${{ github.event.inputs.pr_number }}
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+jobs:
+  unlock_terraform_state:
+    name: 'Unlock Terraform State'
+    runs-on: ubuntu-latest
+    environment: production # Using production environment for approval gate
+
+    steps:
+      - name: 'Checkout Code'
+        uses: actions/checkout@v4
+
+      - name: 'Setup Terraform'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: 'Authenticate to Google Cloud'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: 'Terraform Init'
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform/state/production"
+
+      - name: 'Extract Lock ID'
+        id: extract_lock_id
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN_MAESTRO }}
+        run: |
+          echo "🔐 Fetching logs to find the lock ID..."
+
+          # Get the ID of the latest failed workflow run for the PR
+          RUN_ID=$(gh run list --workflow "terraform-apply-production.yml" --json databaseId,status --jq '.[] | select(.status == "failure") | .databaseId' | head -n 1)
+
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::No failed workflow runs found for terraform-apply-production.yml"
+            exit 1
+          fi
+
+          echo "Found failed run ID: $RUN_ID"
+
+          # Download the logs for the failed run
+          gh run view $RUN_ID --log > logs.txt
+
+          # Extract the Lock ID from the logs
+          LOCK_ID=$(grep -oP 'Lock ID: \K[a-f0-9-]+' logs.txt)
+
+          if [ -z "$LOCK_ID" ]; then
+            echo "::error::Could not find Lock ID in the logs."
+            exit 1
+          fi
+
+          echo "LOCK_ID=${LOCK_ID}" >> $GITHUB_OUTPUT
+          echo "Found Lock ID: ${LOCK_ID}"
+
+      - name: 'Manual Approval'
+        id: manual_approval
+        run: |
+          echo "Waiting for manual approval to unlock the Terraform state."
+          # This step will pause the workflow, waiting for an authorized user to approve.
+          # The approval is handled by the 'environment' configuration of this job.
+
+      - name: 'Unlock Terraform State'
+        if: success() # This step will only run if the manual approval is given
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          echo "🔑 Unlocking Terraform state with Lock ID: ${{ steps.extract_lock_id.outputs.LOCK_ID }}"
+          terraform force-unlock ${{ steps.extract_lock_id.outputs.LOCK_ID }}
+          echo "✅ Terraform state unlocked."
+
+      - name: 'Post Comment to PR'
+        if: always() # Always post a comment, regardless of success or failure
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN_MAESTRO }}
+          script: |
+            const prNumber = process.env.PR_NUMBER;
+            let commentBody;
+
+            if ( ${{ job.status }} === 'success' ) {
+              commentBody = `✅ **Terraform state unlocked successfully!** You can now re-run the apply job.`;
+            } else {
+              commentBody = `❌ **Failed to unlock Terraform state.** Please check the workflow logs for more details.`;
+            }
+
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: commentBody
+            });
