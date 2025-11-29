@@ -103,7 +103,7 @@ jobs:
             const prNumber = process.env.PR_NUMBER;
             let commentBody;
 
-          if ( '${{ job.status }}' === 'success' ) {
+            if ( '${{ job.status }}' === 'success' ) {
               commentBody = `✅ **Terraform state unlocked successfully!** You can now re-run the apply job.`;
             } else {
               commentBody = `❌ **Failed to unlock Terraform state.** Please check the workflow logs for more details.`;
