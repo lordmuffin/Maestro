@@ -74,6 +74,12 @@ if ($LASTEXITCODE -eq 0) {
         --display-name="Terraform Plan Read-Only" `
         --project=$PROJECT_ID 2>&1
     Write-Host "✓ Created terraform-plan-readonly service account" -ForegroundColor Green
+    echo "  Granting Firebase Rules viewer access..."
+    gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+        --member="serviceAccount:terraform-plan-readonly@$PROJECT_ID.iam.gserviceaccount.com" \
+        --role="roles/firebaserules.viewer" \
+        --condition=None \
+        --quiet
 }
 
 Write-Host "  Granting IAM roles..."
