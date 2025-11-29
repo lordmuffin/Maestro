@@ -8,7 +8,7 @@ import os
 import sys
 import logging
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional
 import base64
 from pathlib import Path
@@ -18,6 +18,7 @@ from flask import Flask, request, jsonify, make_response
 import functions_framework
 from google.cloud import firestore
 from google.cloud import aiplatform
+from google.cloud import logging as gcp_logging
 import vertexai
 from vertexai.generative_models import GenerativeModel, Part, Content
 from github import Github
@@ -49,6 +50,7 @@ GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '')
 OBSIDIAN_DRIVE_FOLDER_ID = os.environ.get('OBSIDIAN_DRIVE_FOLDER_ID', '')
 KANBAN_FOLDER_ID = os.environ.get('KANBAN_FOLDER_ID', '')
 BEYOND_REPO_NAME = os.environ.get('BEYOND_REPO_NAME', 'lordmuffin/beyond')
+LOGS_WHITELIST = os.environ.get('LOGS_WHITELIST', '')
 
 # Safe integer conversion with error handling
 try:
@@ -2083,6 +2085,9 @@ class TelegramWebhookHandler:
             elif message_text.startswith('/help'):
                 return self._handle_help_command(chat_id)
 
+            elif message_text.startswith('/logs'):
+                return self._handle_logs_command(chat_id, user_id)
+
             # Handle file uploads (audio, images, documents)
             elif 'audio' in message or 'voice' in message or 'photo' in message or 'document' in message:
                 return self._handle_file_upload(session_id, chat_id, message)
@@ -2106,11 +2111,89 @@ class TelegramWebhookHandler:
         welcome_text += "/start - Show this welcome message\n"
         welcome_text += "/upload - Get upload link for audio/images\n"
         welcome_text += "/done - Complete session and create PR\n"
+        welcome_text += "/logs - Fetch recent application logs\n"
         welcome_text += "/help - Show help information\n\n"
         welcome_text += "Just send me a message to start our technical interview!"
 
         self.telegram_client.send_message(chat_id, welcome_text)
         return {'status': 'ok'}
+
+    def _handle_logs_command(self, chat_id: int, user_id: int) -> Dict[str, Any]:
+        """Handle the /logs command to fetch and display application logs."""
+        try:
+            # Authorization check
+            if LOGS_WHITELIST:
+                whitelist = [int(uid.strip()) for uid in LOGS_WHITELIST.split(',')]
+                if user_id not in whitelist:
+                    self.telegram_client.send_message(chat_id, "❌ You are not authorized to use this command.")
+                    return {'status': 'unauthorized'}
+
+            self.telegram_client.send_message(chat_id, "⏳ Fetching logs for the last 5 minutes...")
+
+            # Initialize logging client
+            log_client = gcp_logging.Client(project=GCP_PROJECT)
+
+            # Define filter
+            function_name = os.environ.get('FUNCTION_NAME', 'v2v2b-interrogator')
+            five_minutes_ago = (datetime.utcnow() - timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            filter_str = (
+                f'resource.type="cloud_function" '
+                f'resource.labels.function_name="{function_name}" '
+                f'severity>="ERROR" '
+                f'timestamp>="{five_minutes_ago}"'
+            )
+
+            # Fetch logs
+            entries = log_client.list_entries(filter_=filter_str, order_by=gcp_logging.DESCENDING)
+
+            # Process and format logs
+            log_summary = self._format_log_entries(entries)
+
+            self.telegram_client.send_message(chat_id, log_summary, parse_mode='Markdown')
+            return {'status': 'ok'}
+        except Exception as e:
+            logger.error(f"Error handling /logs command: {e}", exc_info=True)
+            self.telegram_client.safe_send_error(chat_id, e, context="fetching logs")
+            return {'status': 'error'}
+
+    def _format_log_entries(self, entries) -> str:
+        """Format log entries into a summary for Telegram."""
+        log_count = 0
+        error_count = 0
+        critical_count = 0
+        formatted_logs = []
+
+        for entry in entries:
+            log_count += 1
+            if entry.severity == 'ERROR':
+                error_count += 1
+            elif entry.severity == 'CRITICAL':
+                critical_count += 1
+
+            timestamp = entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            payload = entry.payload if isinstance(entry.payload, str) else json.dumps(entry.payload)
+
+            # Sanitize for Markdown
+            payload = payload.replace('`', '\\`').replace('*', '\\*').replace('_', '\\_')
+
+            formatted_logs.append(f"*{timestamp}* - `{entry.severity}`\n```{payload[:200]}...```")
+
+        if log_count == 0:
+            return "✅ No ERROR or CRITICAL logs found in the last 5 minutes."
+
+        summary = (
+            f"🔎 *Log Summary (Last 5 mins)*\n"
+            f"----------------------------------\n"
+            f"🔴 *Critical:* {critical_count}\n"
+            f"🟠 *Errors:* {error_count}\n"
+            f"----------------------------------\n\n"
+            + "\n".join(formatted_logs[:10])  # Limit to 10 most recent logs
+        )
+
+        if log_count > 10:
+            summary += "\n\n... (and more)"
+
+        return summary
 
     def _handle_help_command(self, chat_id: int) -> Dict[str, Any]:
         """Handle /help command."""
