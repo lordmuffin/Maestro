@@ -50,9 +50,14 @@ variable "memory" {
   default     = "512Mi"
 
   validation {
-    condition     = can(regex("^[0-9]+(Mi|Gi)$", var.memory))
     error_message = "Memory must be specified in Mi or Gi (e.g., 512Mi, 1Gi)"
   }
+}
+
+variable "cpu" {
+  description = "CPU allocation for the Cloud Function"
+  type        = string
+  default     = "1"
 }
 
 variable "timeout_seconds" {

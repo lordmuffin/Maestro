@@ -4,6 +4,7 @@
 # Cloud Function Configuration
 function_name      = "v2v2b-interrogator"
 memory             = "1Gi"
+cpu                = "1"
 max_instance_count = 10
 min_instance_count = 1
 timeout_seconds    = 540
