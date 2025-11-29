@@ -206,10 +206,10 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
         KANBAN_FOLDER_ID         = var.kanban_folder_id
         DRIVE_POLL_INTERVAL      = tostring(var.drive_poll_interval)
         # Note: FUNCTION_URL is set via output after first deployment
-        FUNCTION_URL = var.function_url != "" ? var.function_url : "https://${var.region}-${var.gcp_project}.cloudfunctions.net/${var.function_name}"
-        BEYOND_REPO_NAME         = var.beyond_repo_name
-        LOGS_WHITELIST           = var.logs_whitelist
-        FUNCTION_NAME            = var.function_name
+        FUNCTION_URL     = var.function_url != "" ? var.function_url : "https://${var.region}-${var.gcp_project}.cloudfunctions.net/${var.function_name}"
+        BEYOND_REPO_NAME = var.beyond_repo_name
+        LOGS_WHITELIST   = var.logs_whitelist
+        FUNCTION_NAME    = var.function_name
       },
       # Add per-repository GitHub tokens
       {
