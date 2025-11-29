@@ -4,6 +4,9 @@ A serverless application that interrogates technical authors via Telegram
 and processes multimodal inputs (text, audio, images) using Gemini AI.
 """
 
+# Force rebuild
+
+
 import os
 import sys
 import logging
