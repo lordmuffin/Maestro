@@ -195,6 +195,7 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
     max_instance_count = var.max_instance_count
     min_instance_count = var.min_instance_count
     available_memory   = var.memory
+    available_cpu      = var.cpu
     timeout_seconds    = var.timeout_seconds
 
     environment_variables = merge(
