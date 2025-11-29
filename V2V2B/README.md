@@ -1,3 +1,5 @@
+### This has been refactored into a folder structure to represent itself as a small component of a larger system called Jarvis formerly known as V2V2B or Project Maestro.
+
 # V2V2B Interrogator - Terraform Deployment
 
 Infrastructure-as-Code deployment for the V2V2B Interrogator: An AI-powered system that auto-processes transcripts from Google Drive, creates interrogation PRs, builds a knowledge base, and syncs to Obsidian.
@@ -16,15 +18,17 @@ Infrastructure-as-Code deployment for the V2V2B Interrogator: An AI-powered syst
 ## 📁 Directory Structure
 
 ```
-terraform/
-├── main.tf                      # Main Terraform configuration
-├── main.py                      # Cloud Function source code
-├── requirements.txt             # Python dependencies
-├── variables.tf                 # Variable definitions
-├── outputs.tf                   # Output values
-├── backend.tf                   # State backend configuration
-├── terraform.tfvars.example     # Example variables file
-├── .gitignore                   # Terraform-specific gitignore
+.
+├── V2V2B/                       # Application source code
+│   ├── main.py                  # Cloud Function source code
+│   ├── requirements.txt         # Python dependencies
+│   └── ...
+├── terraform/                   # Terraform configuration
+│   ├── main.tf                  # Main Terraform configuration
+│   ├── variables.tf             # Variable definitions
+│   ├── outputs.tf               # Output values
+│   ├── backend.tf               # State backend configuration
+│   └── ...
 └── README.md                    # This file
 ```
 

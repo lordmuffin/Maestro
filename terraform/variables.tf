@@ -132,3 +132,15 @@ variable "drive_poll_interval" {
     error_message = "Poll interval must be between 60 and 3600 seconds"
   }
 }
+
+variable "beyond_repo_name" {
+  description = "Repository name for 'Beyond' project"
+  type        = string
+  default     = "lordmuffin/beyond"
+}
+
+variable "logs_whitelist" {
+  description = "Comma-separated list of users/IDs whitelisted for logs"
+  type        = string
+  default     = ""
+}
