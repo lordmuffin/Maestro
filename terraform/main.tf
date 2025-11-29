@@ -1,5 +1,5 @@
 # Prerequisites:
-# IMPORTANT: The following must be completed before running Terraform:
+# IMPORTANT: The following must be completed before running OpenTofu (or Terraform):
 #
 # 1. BILLING ACCOUNT: Enable billing for the GCP project
 #    - Go to: https://console.cloud.google.com/billing/linkedaccount?project=<PROJECT_ID>
@@ -44,7 +44,7 @@ provider "google" {
 
 # Enable required APIs
 # Note: Service Usage API and IAM API must be manually enabled in the GCP Console first
-# or through gcloud CLI before running Terraform
+# or through gcloud CLI before running OpenTofu/Terraform
 
 resource "google_project_service" "cloud_functions" {
   service            = "cloudfunctions.googleapis.com"
