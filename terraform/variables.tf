@@ -50,6 +50,7 @@ variable "memory" {
   default     = "512Mi"
 
   validation {
+    condition     = can(regex("^[0-9]+(Mi|Gi)$", var.memory))
     error_message = "Memory must be specified in Mi or Gi (e.g., 512Mi, 1Gi)"
   }
 }
