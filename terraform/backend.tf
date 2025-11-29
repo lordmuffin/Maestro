@@ -1,10 +1,10 @@
-# Backend configuration for Terraform state management
+# Backend configuration for OpenTofu/Terraform state management
 #
 # Google Cloud Storage backend for multi-environment state management
 #
 # State prefix is configured via CLI at init time:
-# - Staging:    terraform init -backend-config="prefix=terraform/state/staging"
-# - Production: terraform init -backend-config="prefix=terraform/state/production"
+# - Staging:    tofu init -backend-config="prefix=terraform/state/staging"
+# - Production: tofu init -backend-config="prefix=terraform/state/production"
 #
 # This allows separate state files per environment:
 #   gs://project-maestro-tfstate/terraform/state/staging/default.tfstate
@@ -40,4 +40,4 @@ terraform {
 #
 # 3. Uncomment the "gcs" backend configuration above
 #
-# 4. Run: terraform init -migrate-state
+# 4. Run: tofu init -migrate-state
