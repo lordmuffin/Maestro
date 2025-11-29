@@ -56,7 +56,7 @@ jobs:
           echo "🔐 Fetching logs to find the lock ID..."
 
           # Get the ID of the latest failed workflow run for the PR
-          RUN_ID=$(gh run list --workflow "terraform-apply-production.yml" --json databaseId,status --jq '.[] | select(.status == "failure") | .databaseId' | head -n 1)
+          RUN_ID=$(gh run list --workflow "terraform-apply-production.yml" --json databaseId,status --jq '.[] | select(.status == "failure" or .status == "cancelled" or .status == "timed_out") | .databaseId' | head -n 1)
 
           if [ -z "$RUN_ID" ]; then
             echo "::error::No failed workflow runs found for terraform-apply-production.yml"
@@ -103,7 +103,7 @@ jobs:
             const prNumber = process.env.PR_NUMBER;
             let commentBody;
 
-            if ( ${{ job.status }} === 'success' ) {
+            if ( '${{ job.status }}' === 'success' ) {
               commentBody = `✅ **Terraform state unlocked successfully!** You can now re-run the apply job.`;
             } else {
               commentBody = `❌ **Failed to unlock Terraform state.** Please check the workflow logs for more details.`;
