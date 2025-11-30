@@ -1,4 +1,4 @@
-name: 'Terraform Drift Detection'
+name: 'OpenTofu Drift Detection'
 
 on:
   schedule:

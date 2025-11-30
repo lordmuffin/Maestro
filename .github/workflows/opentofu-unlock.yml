@@ -1,4 +1,4 @@
-name: 'Terraform Unlock'
+name: 'OpenTofu Unlock'
 
 on:
   workflow_dispatch:

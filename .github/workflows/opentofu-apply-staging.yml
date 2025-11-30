@@ -1,27 +1,27 @@
-name: 'Terraform Apply - Production'
+name: 'OpenTofu Apply - Staging'
 
 on:
   push:
-    branches: [main]
+    branches: [develop]
     paths:
       - 'terraform/**'
-      - '.github/workflows/terraform-apply-production.yml'
+      - '.github/workflows/opentofu-apply-staging.yml'
 
 permissions:
-  contents: write  # Needed for creating tags
+  contents: read
   id-token: write
   issues: write
 
 env:
   OPENTOFU_VERSION: '1.10.0'
   WORKING_DIR: './terraform'
-  ENVIRONMENT: 'production'
+  ENVIRONMENT: 'staging'
 
 jobs:
-  apply-production:
-    name: 'Apply to Production'
+  apply-staging:
+    name: 'Apply to Staging'
     runs-on: ubuntu-latest
-    environment: production  # ⚠️ CRITICAL: This triggers the manual approval gate
+    environment: staging
 
     steps:
       - name: Checkout code
@@ -46,7 +46,7 @@ jobs:
             -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
             -backend-config="prefix=terraform/state/${{ env.ENVIRONMENT }}"
 
-      - name: Select Production Workspace
+      - name: Select Staging Workspace
         working-directory: ${{ env.WORKING_DIR }}
         run: |
           tofu workspace select ${{ env.ENVIRONMENT }} || \
@@ -59,7 +59,7 @@ jobs:
           BACKUP_FILE="state-backup-$(date +%Y%m%d-%H%M%S).json"
           tofu state pull > "$BACKUP_FILE"
           echo "backup_file=$BACKUP_FILE" >> $GITHUB_OUTPUT
-          echo "✅ State backed up to: $BACKUP_FILE"
+          echo "State backed up successfully to: $BACKUP_FILE"
 
       - name: Import Existing Resources
         working-directory: ${{ env.WORKING_DIR }}
@@ -162,32 +162,6 @@ jobs:
         run: |
           echo "function_url=$(tofu output -raw function_url 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
           echo "function_name=$(tofu output -raw function_name 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
-          echo "telegram_webhook_url=$(tofu output -raw function_url 2>/dev/null || echo '')/telegram" >> $GITHUB_OUTPUT
-
-      - name: Update Telegram Webhook
-        if: steps.apply.outcome == 'success'
-        run: |
-          WEBHOOK_URL="${{ steps.outputs.outputs.telegram_webhook_url }}"
-          if [ -n "$WEBHOOK_URL" ] && [ "$WEBHOOK_URL" != "/telegram" ]; then
-            echo "Updating Telegram webhook to: $WEBHOOK_URL"
-            curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/setWebhook?url=$WEBHOOK_URL"
-            echo ""
-            echo "✅ Telegram webhook updated"
-          else
-            echo "⚠️ Skipping webhook update - function URL not available"
-          fi
-        continue-on-error: true
-
-      - name: 🏷️ Generate DORA Deployment Tag
-        if: success() # Only tag if the previous deployment steps worked
-        run: |
-          # Generate a tag format: deploy-prod-YYYYMMDD-HHMMSS
-          TAG_NAME="deploy-prod-$(date +'%Y%m%d-%H%M%S')"
-          echo "Creating release tag: $TAG_NAME"
-          
-          # Tag the commit that just deployed
-          git tag $TAG_NAME
-          git push origin $TAG_NAME
 
       - name: Rollback on Failure
         if: steps.apply.outcome == 'failure'
@@ -201,12 +175,6 @@ jobs:
             echo "Restoring state from backup: $BACKUP_FILE"
             tofu state push -force "$BACKUP_FILE"
             echo "✅ Rollback complete - state restored to pre-deployment version"
-
-            # Log rollback details
-            echo "Rollback Details:" >> rollback.log
-            echo "Failed commit: ${{ github.sha }}" >> rollback.log
-            echo "Backup file: $BACKUP_FILE" >> rollback.log
-            echo "Restored successfully" >> rollback.log
           else
             echo "⚠️ No backup file found - cannot rollback automatically"
             echo "Manual intervention may be required"
@@ -218,49 +186,21 @@ jobs:
         if: always()
         run: |
           cat >> $GITHUB_STEP_SUMMARY <<EOF
-          ## 🚀 Production Deployment Summary
+          ## 🚀 Staging Deployment Summary
 
           **Environment:** \`${{ env.ENVIRONMENT }}\`
           **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           **Commit:** \`${{ github.sha }}\`
           **Author:** @${{ github.actor }}
-          **Approved by:** @${{ github.triggering_actor }}
 
           ### Status
           ${{ steps.apply.outcome == 'success' && '✅ **Deployment Successful**' || '❌ **Deployment Failed**' }}
 
-          ${{ steps.apply.outcome == 'success' && format('### Deployment Details\n**Function Name:** `{0}`\n**Function URL:** `{1}`\n**Telegram Webhook:** Updated\n**Deployment Tag:** Created', steps.outputs.outputs.function_name, steps.outputs.outputs.function_url) || '### Rollback\nAutomatic rollback initiated to previous state version.' }}
+          ${{ steps.apply.outcome == 'success' && format('**Function URL:** `{0}`', steps.outputs.outputs.function_url) || '**Rollback:** Automatic rollback initiated' }}
 
           ### Next Steps
-          ${{ steps.apply.outcome == 'success' && '- ✅ Test production environment\n- ✅ Verify Telegram bot functionality\n- ✅ Monitor for issues' || '- 🔍 Check workflow logs for error details\n- 🔧 Fix issues in a new PR\n- 🔄 Retry deployment after fixes' }}
+          ${{ steps.apply.outcome == 'success' && '- Test staging environment\n- Create PR to `main` for production deployment' || '- Check workflow logs\n- Fix issues and push new commit to `develop`' }}
           EOF
-
-      - name: Notify on Success
-        if: steps.apply.outcome == 'success'
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          username: ${{ vars.NOTIFICATION_EMAIL }}
-          password: ${{ secrets.EMAIL_APP_PASSWORD }}
-          subject: '✅ Maestro Production Deployment Successful'
-          to: ${{ vars.NOTIFICATION_EMAIL }}
-          from: 'Maestro GitOps <${{ vars.NOTIFICATION_EMAIL }}>'
-          body: |
-            Production deployment completed successfully!
-
-            **Repository:** ${{ github.repository }}
-            **Branch:** ${{ github.ref_name }}
-            **Commit:** ${{ github.sha }}
-            **Author:** ${{ github.actor }}
-            **Approved by:** ${{ github.triggering_actor }}
-
-            **Function URL:** ${{ steps.outputs.outputs.function_url }}
-
-            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            Please verify the deployment in the production environment.
-        continue-on-error: true
 
       - name: Notify on Failure
         if: steps.apply.outcome == 'failure'
@@ -270,20 +210,20 @@ jobs:
           server_port: 587
           username: ${{ vars.NOTIFICATION_EMAIL }}
           password: ${{ secrets.EMAIL_APP_PASSWORD }}
-          subject: '❌ Maestro Production Deployment Failed'
+          subject: '❌ Maestro Staging Deployment Failed'
           to: ${{ vars.NOTIFICATION_EMAIL }}
           from: 'Maestro GitOps <${{ vars.NOTIFICATION_EMAIL }}>'
           body: |
-            Production deployment FAILED for commit ${{ github.sha }}.
+            Staging deployment failed for commit ${{ github.sha }}.
 
             **Repository:** ${{ github.repository }}
             **Branch:** ${{ github.ref_name }}
             **Author:** ${{ github.actor }}
             **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-            ⚠️ Automatic rollback was initiated.
+            Automatic rollback was initiated.
 
-            Please review the workflow logs and fix the issues before retrying.
+            Please review the workflow logs for details.
         continue-on-error: true
 
       - name: Fail Workflow on Apply Failure

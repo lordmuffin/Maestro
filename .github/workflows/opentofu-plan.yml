@@ -5,7 +5,7 @@ on:
     branches: [main, develop]
     paths:
       - 'terraform/**'
-      - '.github/workflows/terraform-*.yml'
+      - '.github/workflows/opentofu-*.yml'
 
 permissions:
   contents: read
