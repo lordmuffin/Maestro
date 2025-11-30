@@ -5,6 +5,7 @@ on:
     branches: [main, develop]
     paths:
       - 'terraform/**'
+      - '!terraform/azure/**'
       - '.github/workflows/terraform-*.yml'
 
 permissions:
