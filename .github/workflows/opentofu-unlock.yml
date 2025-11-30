@@ -1,4 +1,4 @@
-name: 'Terraform Unlock'
+name: 'OpenTofu Unlock'
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         type: string
 
 env:
-  TERRAFORM_VERSION: '1.6.0'
+  OPENTOFU_VERSION: '1.10.0'
   WORKING_DIR: './terraform'
   PR_NUMBER: ${{ github.event.inputs.pr_number }}
 
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   unlock_terraform_state:
-    name: 'Unlock Terraform State'
+    name: 'Unlock OpenTofu State'
     runs-on: ubuntu-latest
     environment: production # Using production environment for approval gate
 
@@ -29,11 +29,11 @@ jobs:
       - name: 'Checkout Code'
         uses: actions/checkout@v4
 
-      - name: 'Setup Terraform'
-        uses: hashicorp/setup-terraform@v3
+      - name: 'Setup OpenTofu'
+        uses: opentofu/setup-opentofu@v1
         with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-          terraform_wrapper: false
+          tofu_version: ${{ env.OPENTOFU_VERSION }}
+          tofu_wrapper: false
 
       - name: 'Authenticate to Google Cloud'
         uses: google-github-actions/auth@v2
@@ -41,10 +41,10 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: 'Terraform Init'
+      - name: 'OpenTofu Init'
         working-directory: ${{ env.WORKING_DIR }}
         run: |
-          terraform init \
+          tofu init \
             -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
             -backend-config="prefix=terraform/state/production"
 
@@ -82,17 +82,17 @@ jobs:
       - name: 'Manual Approval'
         id: manual_approval
         run: |
-          echo "Waiting for manual approval to unlock the Terraform state."
+          echo "Waiting for manual approval to unlock the OpenTofu state."
           # This step will pause the workflow, waiting for an authorized user to approve.
           # The approval is handled by the 'environment' configuration of this job.
 
-      - name: 'Unlock Terraform State'
+      - name: 'Unlock OpenTofu State'
         if: success() # This step will only run if the manual approval is given
         working-directory: ${{ env.WORKING_DIR }}
         run: |
-          echo "🔑 Unlocking Terraform state with Lock ID: ${{ steps.extract_lock_id.outputs.LOCK_ID }}"
-          terraform force-unlock ${{ steps.extract_lock_id.outputs.LOCK_ID }}
-          echo "✅ Terraform state unlocked."
+          echo "🔑 Unlocking OpenTofu state with Lock ID: ${{ steps.extract_lock_id.outputs.LOCK_ID }}"
+          tofu force-unlock ${{ steps.extract_lock_id.outputs.LOCK_ID }}
+          echo "✅ OpenTofu state unlocked."
 
       - name: 'Post Comment to PR'
         if: always() # Always post a comment, regardless of success or failure
@@ -104,9 +104,9 @@ jobs:
             let commentBody;
 
             if ( ${{ job.status }} === 'success' ) {
-              commentBody = `✅ **Terraform state unlocked successfully!** You can now re-run the apply job.`;
+              commentBody = `✅ **OpenTofu state unlocked successfully!** You can now re-run the apply job.`;
             } else {
-              commentBody = `❌ **Failed to unlock Terraform state.** Please check the workflow logs for more details.`;
+              commentBody = `❌ **Failed to unlock OpenTofu state.** Please check the workflow logs for more details.`;
             }
 
             github.rest.issues.createComment({

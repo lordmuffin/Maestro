@@ -1,37 +1,37 @@
-name: 'Terraform Apply - Staging'
+name: 'OpenTofu Apply - Production'
 
 on:
   push:
-    branches: [develop]
+    branches: [main]
     paths:
       - 'terraform/**'
-      - '.github/workflows/terraform-apply-staging.yml'
+      - '.github/workflows/opentofu-apply-production.yml'
 
 permissions:
-  contents: read
+  contents: write  # Needed for creating tags
   id-token: write
   issues: write
 
 env:
-  TERRAFORM_VERSION: '1.6.0'
+  OPENTOFU_VERSION: '1.10.0'
   WORKING_DIR: './terraform'
-  ENVIRONMENT: 'staging'
+  ENVIRONMENT: 'production'
 
 jobs:
-  apply-staging:
-    name: 'Apply to Staging'
+  apply-production:
+    name: 'Apply to Production'
     runs-on: ubuntu-latest
-    environment: staging
+    environment: production  # ⚠️ CRITICAL: This triggers the manual approval gate
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
         with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-          terraform_wrapper: false
+          tofu_version: ${{ env.OPENTOFU_VERSION }}
+          tofu_wrapper: false
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -39,27 +39,27 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Terraform Init
+      - name: OpenTofu Init
         working-directory: ${{ env.WORKING_DIR }}
         run: |
-          terraform init \
+          tofu init \
             -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
             -backend-config="prefix=terraform/state/${{ env.ENVIRONMENT }}"
 
-      - name: Select Staging Workspace
+      - name: Select Production Workspace
         working-directory: ${{ env.WORKING_DIR }}
         run: |
-          terraform workspace select ${{ env.ENVIRONMENT }} || \
-          terraform workspace new ${{ env.ENVIRONMENT }}
+          tofu workspace select ${{ env.ENVIRONMENT }} || \
+          tofu workspace new ${{ env.ENVIRONMENT }}
 
       - name: Backup Current State
         id: backup
         working-directory: ${{ env.WORKING_DIR }}
         run: |
           BACKUP_FILE="state-backup-$(date +%Y%m%d-%H%M%S).json"
-          terraform state pull > "$BACKUP_FILE"
+          tofu state pull > "$BACKUP_FILE"
           echo "backup_file=$BACKUP_FILE" >> $GITHUB_OUTPUT
-          echo "State backed up successfully to: $BACKUP_FILE"
+          echo "✅ State backed up to: $BACKUP_FILE"
 
       - name: Import Existing Resources
         working-directory: ${{ env.WORKING_DIR }}
@@ -77,42 +77,42 @@ jobs:
           echo "🔄 Attempting to import existing resources..."
 
           # Import Firestore database (ignore errors if doesn't exist or already in state)
-          terraform import \
+          tofu import \
             -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
             google_firestore_database.database \
             "projects/${{ secrets.GCP_PROJECT_ID }}/databases/(default)" \
             2>&1 | grep -v "Enter a value" || echo "⚠️ Firestore database not imported (may already be in state or not exist)"
 
           # Import storage bucket (ignore errors if doesn't exist or already in state)
-          terraform import \
+          tofu import \
             -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
             google_storage_bucket.function_bucket \
             "${{ secrets.GCP_PROJECT_ID }}-v2v2b-function-source" \
             2>&1 | grep -v "Enter a value" || echo "⚠️ Storage bucket not imported (may already be in state or not exist)"
 
           # Import service account (ignore errors if doesn't exist or already in state)
-          terraform import \
+          tofu import \
             -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
             google_service_account.function_sa \
             "projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/v2v2b-interrogator-${{ env.ENVIRONMENT }}-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             2>&1 | grep -v "Enter a value" || echo "⚠️ Service account not imported (may already be in state or not exist)"
 
           # Import Firestore rules release (ignore errors if doesn't exist or already in state)
-          terraform import \
+          tofu import \
             -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
             'google_firebaserules_release.firestore[0]' \
             "projects/${{ secrets.GCP_PROJECT_ID }}/releases/cloud.firestore" \
             2>&1 | grep -v "Enter a value" || echo "⚠️ Firestore rules release not imported (may already be in state or not exist)"
 
           # Import Cloud Function (ignore errors if doesn't exist or already in state)
-          terraform import \
+          tofu import \
             -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
             google_cloudfunctions2_function.v2v2b_interrogator \
             "projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/functions/v2v2b-interrogator-${{ env.ENVIRONMENT }}" \
             2>&1 | grep -v "Enter a value" || echo "⚠️ Cloud Function not imported (may already be in state or not exist)"
 
           # Import Cloud Run IAM member (ignore errors if doesn't exist or already in state)
-          terraform import \
+          tofu import \
             -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
             google_cloud_run_service_iam_member.public_access \
             "v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/services/v2v2b-interrogator-${{ env.ENVIRONMENT }} roles/run.invoker allUsers" \
@@ -121,7 +121,7 @@ jobs:
           echo "✅ Import step complete"
         continue-on-error: true
 
-      - name: Terraform Plan
+      - name: OpenTofu Plan
         working-directory: ${{ env.WORKING_DIR }}
         env:
           TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
@@ -134,12 +134,12 @@ jobs:
           TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
           TF_VAR_repos_config_file: 'repos.json'
         run: |
-          terraform plan \
+          tofu plan \
             -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
             -no-color \
             -out=tfplan
 
-      - name: Terraform Apply
+      - name: OpenTofu Apply
         id: apply
         working-directory: ${{ env.WORKING_DIR }}
         env:
@@ -152,16 +152,46 @@ jobs:
           TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
           TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
           TF_VAR_repos_config_file: 'repos.json'
-        run: terraform apply -auto-approve tfplan
+        run: tofu apply -auto-approve tfplan
         continue-on-error: true
 
-      - name: Get Terraform Outputs
+      - name: Get OpenTofu Outputs
         if: steps.apply.outcome == 'success'
         id: outputs
         working-directory: ${{ env.WORKING_DIR }}
         run: |
-          echo "function_url=$(terraform output -raw function_url 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
-          echo "function_name=$(terraform output -raw function_name 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
+          echo "function_url=$(tofu output -raw function_url 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
+          echo "function_name=$(tofu output -raw function_name 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
+          echo "telegram_webhook_url=$(tofu output -raw function_url 2>/dev/null || echo '')/telegram" >> $GITHUB_OUTPUT
+
+      - name: Update Telegram Webhook
+        if: steps.apply.outcome == 'success'
+        run: |
+          WEBHOOK_URL="${{ steps.outputs.outputs.telegram_webhook_url }}"
+          if [ -n "$WEBHOOK_URL" ] && [ "$WEBHOOK_URL" != "/telegram" ]; then
+            echo "Updating Telegram webhook to: $WEBHOOK_URL"
+            curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/setWebhook?url=$WEBHOOK_URL"
+            echo ""
+            echo "✅ Telegram webhook updated"
+          else
+            echo "⚠️ Skipping webhook update - function URL not available"
+          fi
+        continue-on-error: true
+
+      - name: Create Deployment Tag
+        if: steps.apply.outcome == 'success'
+        run: |
+          TAG_NAME="deploy-prod-$(date +%Y%m%d-%H%M%S)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG_NAME" -m "Production deployment
+
+          Commit: ${{ github.sha }}
+          Function: ${{ steps.outputs.outputs.function_name }}
+          URL: ${{ steps.outputs.outputs.function_url }}
+          Deployed by: @${{ github.actor }}"
+          git push origin "$TAG_NAME"
+          echo "✅ Created deployment tag: $TAG_NAME"
 
       - name: Rollback on Failure
         if: steps.apply.outcome == 'failure'
@@ -173,8 +203,14 @@ jobs:
 
           if [ -f "$BACKUP_FILE" ]; then
             echo "Restoring state from backup: $BACKUP_FILE"
-            terraform state push -force "$BACKUP_FILE"
+            tofu state push -force "$BACKUP_FILE"
             echo "✅ Rollback complete - state restored to pre-deployment version"
+
+            # Log rollback details
+            echo "Rollback Details:" >> rollback.log
+            echo "Failed commit: ${{ github.sha }}" >> rollback.log
+            echo "Backup file: $BACKUP_FILE" >> rollback.log
+            echo "Restored successfully" >> rollback.log
           else
             echo "⚠️ No backup file found - cannot rollback automatically"
             echo "Manual intervention may be required"
@@ -186,21 +222,49 @@ jobs:
         if: always()
         run: |
           cat >> $GITHUB_STEP_SUMMARY <<EOF
-          ## 🚀 Staging Deployment Summary
+          ## 🚀 Production Deployment Summary
 
           **Environment:** \`${{ env.ENVIRONMENT }}\`
           **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           **Commit:** \`${{ github.sha }}\`
           **Author:** @${{ github.actor }}
+          **Approved by:** @${{ github.triggering_actor }}
 
           ### Status
           ${{ steps.apply.outcome == 'success' && '✅ **Deployment Successful**' || '❌ **Deployment Failed**' }}
 
-          ${{ steps.apply.outcome == 'success' && format('**Function URL:** `{0}`', steps.outputs.outputs.function_url) || '**Rollback:** Automatic rollback initiated' }}
+          ${{ steps.apply.outcome == 'success' && format('### Deployment Details\n**Function Name:** `{0}`\n**Function URL:** `{1}`\n**Telegram Webhook:** Updated\n**Deployment Tag:** Created', steps.outputs.outputs.function_name, steps.outputs.outputs.function_url) || '### Rollback\nAutomatic rollback initiated to previous state version.' }}
 
           ### Next Steps
-          ${{ steps.apply.outcome == 'success' && '- Test staging environment\n- Create PR to `main` for production deployment' || '- Check workflow logs\n- Fix issues and push new commit to `develop`' }}
+          ${{ steps.apply.outcome == 'success' && '- ✅ Test production environment\n- ✅ Verify Telegram bot functionality\n- ✅ Monitor for issues' || '- 🔍 Check workflow logs for error details\n- 🔧 Fix issues in a new PR\n- 🔄 Retry deployment after fixes' }}
           EOF
+
+      - name: Notify on Success
+        if: steps.apply.outcome == 'success'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ vars.NOTIFICATION_EMAIL }}
+          password: ${{ secrets.EMAIL_APP_PASSWORD }}
+          subject: '✅ Maestro Production Deployment Successful'
+          to: ${{ vars.NOTIFICATION_EMAIL }}
+          from: 'Maestro GitOps <${{ vars.NOTIFICATION_EMAIL }}>'
+          body: |
+            Production deployment completed successfully!
+
+            **Repository:** ${{ github.repository }}
+            **Branch:** ${{ github.ref_name }}
+            **Commit:** ${{ github.sha }}
+            **Author:** ${{ github.actor }}
+            **Approved by:** ${{ github.triggering_actor }}
+
+            **Function URL:** ${{ steps.outputs.outputs.function_url }}
+
+            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Please verify the deployment in the production environment.
+        continue-on-error: true
 
       - name: Notify on Failure
         if: steps.apply.outcome == 'failure'
@@ -210,20 +274,20 @@ jobs:
           server_port: 587
           username: ${{ vars.NOTIFICATION_EMAIL }}
           password: ${{ secrets.EMAIL_APP_PASSWORD }}
-          subject: '❌ Maestro Staging Deployment Failed'
+          subject: '❌ Maestro Production Deployment Failed'
           to: ${{ vars.NOTIFICATION_EMAIL }}
           from: 'Maestro GitOps <${{ vars.NOTIFICATION_EMAIL }}>'
           body: |
-            Staging deployment failed for commit ${{ github.sha }}.
+            Production deployment FAILED for commit ${{ github.sha }}.
 
             **Repository:** ${{ github.repository }}
             **Branch:** ${{ github.ref_name }}
             **Author:** ${{ github.actor }}
             **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-            Automatic rollback was initiated.
+            ⚠️ Automatic rollback was initiated.
 
-            Please review the workflow logs for details.
+            Please review the workflow logs and fix the issues before retrying.
         continue-on-error: true
 
       - name: Fail Workflow on Apply Failure
