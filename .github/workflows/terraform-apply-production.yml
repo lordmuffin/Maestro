@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'terraform/**'
+      - '!terraform/azure/**'
       - '.github/workflows/terraform-apply-production.yml'
 
 permissions:

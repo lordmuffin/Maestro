@@ -5,6 +5,7 @@ on:
     branches: [develop]
     paths:
       - 'terraform/**'
+      - '!terraform/azure/**'
       - '.github/workflows/terraform-apply-staging.yml'
 
 permissions:

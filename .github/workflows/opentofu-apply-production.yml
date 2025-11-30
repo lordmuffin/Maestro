@@ -1,0 +1,102 @@
+name: 'OpenTofu Apply - Production (Azure)'
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/azure/**'
+      - '.github/workflows/opentofu-apply-production.yml'
+      - 'V2V2B/azure_app/**'
+
+permissions:
+  contents: write
+  id-token: write
+  issues: write
+
+env:
+  OPENTOFU_VERSION: '1.8.0'
+  WORKING_DIR: './terraform/azure'
+  APP_DIR: './V2V2B/azure_app'
+  ENVIRONMENT: 'production'
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+jobs:
+  apply-production:
+    name: 'Apply to Production'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Function Dependencies
+        run: |
+          echo "Installing dependencies to ${APP_DIR}/.python_packages/lib/site-packages"
+          pip install --target="${APP_DIR}/.python_packages/lib/site-packages" -r ${APP_DIR}/requirements.txt
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.OPENTOFU_VERSION }}
+          tofu_wrapper: false
+
+      - name: OpenTofu Init
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          tofu init \
+            -backend-config="resource_group_name=${{ secrets.TF_BACKEND_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ secrets.TF_BACKEND_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ secrets.TF_BACKEND_CONTAINER }}" \
+            -backend-config="key=prod.terraform.tfstate"
+
+      - name: OpenTofu Plan
+        working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          tofu plan \
+            -no-color \
+            -out=tfplan
+
+      - name: OpenTofu Apply
+        id: apply
+        working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        run: tofu apply -auto-approve tfplan
+
+      - name: Get OpenTofu Outputs
+        if: steps.apply.outcome == 'success'
+        id: outputs
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          echo "function_app_name=$(tofu output -raw function_app_name 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
+          echo "function_app_hostname=$(tofu output -raw function_app_default_hostname 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
+
+      - name: Create Deployment Summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🚀 Production Deployment Summary (Azure)
+
+          **Environment:** \`${{ env.ENVIRONMENT }}\`
+          **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          **Commit:** \`${{ github.sha }}\`
+          **Author:** @${{ github.actor }}
+
+          ### Status
+          ${{ steps.apply.outcome == 'success' && '✅ **Deployment Successful**' || '❌ **Deployment Failed**' }}
+
+          ${{ steps.apply.outcome == 'success' && format('### Deployment Details\n**Function Name:** `{0}`\n**Hostname:** `{1}`', steps.outputs.outputs.function_app_name, steps.outputs.outputs.function_app_hostname) || '' }}
+          EOF
