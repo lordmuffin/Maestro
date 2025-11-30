@@ -8,6 +8,7 @@ on:
       - '!master'
     paths:
       - 'terraform/**'
+      - '!terraform/azure/**'
   workflow_dispatch:
     inputs:
       target_branch:
