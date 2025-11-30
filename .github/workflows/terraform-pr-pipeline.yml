@@ -18,7 +18,7 @@ on:
 
 env:
   TF_WORKING_DIR: terraform
-  TERRAFORM_VERSION: '1.6.0'
+  OPENTOFU_VERSION: '1.10.0'
 
 permissions:
   contents: write
@@ -38,11 +38,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
         with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-          terraform_wrapper: false
+          tofu_version: ${{ env.OPENTOFU_VERSION }}
+          tofu_wrapper: false
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -50,35 +50,35 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Terraform Format Check
+      - name: OpenTofu Format Check
         id: fmt
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          echo "🎨 Checking Terraform format..."
-          terraform fmt -check -recursive || {
-            echo "::warning::Terraform formatting issues detected"
+          echo "🎨 Checking OpenTofu format..."
+          tofu fmt -check -recursive || {
+            echo "::warning::OpenTofu formatting issues detected"
             exit 0
           }
         continue-on-error: true
 
-      - name: Terraform Init
+      - name: OpenTofu Init
         id: init
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          echo "🚀 Initializing Terraform..."
-          terraform init \
+          echo "🚀 Initializing OpenTofu..."
+          tofu init \
             -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
             -backend-config="prefix=terraform/state/plan" \
             -input=false
 
-      - name: Terraform Validate
+      - name: OpenTofu Validate
         id: validate
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          echo "✅ Validating Terraform configuration..."
-          terraform validate -no-color
+          echo "✅ Validating OpenTofu configuration..."
+          tofu validate -no-color
 
-      - name: Terraform Plan
+      - name: OpenTofu Plan
         id: plan
         working-directory: ${{ env.TF_WORKING_DIR }}
         env:
@@ -92,25 +92,25 @@ jobs:
           TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
           TF_VAR_repos_config_file: 'repos.json'
         run: |
-          echo "📋 Generating Terraform plan..."
+          echo "📋 Generating OpenTofu plan..."
           # Note: PR pipeline runs a speculative plan without specific environment tfvars
           # to check for general errors, or defaults if available.
           # Ideally, this should target an environment or use a mock tfvars.
           # For now, providing required variables via env vars is a minimum.
-          terraform plan -no-color -input=false -out=tfplan.binary 2>&1 | tee plan_output.txt
+          tofu plan -no-color -input=false -out=tfplan.binary 2>&1 | tee plan_output.txt
 
           # Capture exit code
           EXIT_CODE=${PIPESTATUS[0]}
 
           if [ $EXIT_CODE -eq 0 ]; then
-            echo "✅ Terraform plan generated successfully"
+            echo "✅ OpenTofu plan generated successfully"
           else
-            echo "❌ Terraform plan failed with exit code $EXIT_CODE"
+            echo "❌ OpenTofu plan failed with exit code $EXIT_CODE"
             exit $EXIT_CODE
           fi
 
           # Generate human-readable plan
-          terraform show -no-color tfplan.binary > plan_readable.txt
+          tofu show -no-color tfplan.binary > plan_readable.txt
         continue-on-error: false
 
       - name: Security Scan with tfsec
@@ -205,7 +205,7 @@ jobs:
               `- Mandatory team review and approval\n` +
               `- Policy-as-Code validation (Phase 2, future enhancement)\n` +
               `- Security scanning and compliance checks\n\n` +
-              `**IMPORTANT:** This PR contains a Terraform plan only. No infrastructure changes have been applied yet.\n\n` +
+                `**IMPORTANT:** This PR contains an OpenTofu plan only. No infrastructure changes have been applied yet.\n\n` +
               `### Review Checklist\n` +
               `- [ ] Verify that the proposed changes align with the intended modifications\n` +
               `- [ ] Check for unexpected resource deletions or modifications\n` +
@@ -213,9 +213,9 @@ jobs:
               `- [ ] Ensure compliance with organizational policies\n` +
               `- [ ] Confirm cost implications are acceptable\n` +
               securitySection + `\n` +
-              `### Terraform Plan Output\n\n` +
+                `### OpenTofu Plan Output\n\n` +
               `<details>\n` +
-              `<summary>Click to expand full Terraform plan</summary>\n\n` +
+                `<summary>Click to expand full OpenTofu plan</summary>\n\n` +
               `\`\`\`hcl\n${planText}\n\`\`\`\n\n` +
               `</details>\n\n` +
               `---\n\n` +
@@ -263,7 +263,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: prNumber,
-                  body: `🔄 **Terraform plan updated**\n\nThe infrastructure plan has been regenerated. Please review the updated changes above.\n\n*Updated at: ${new Date().toISOString()}*`
+                    body: `🔄 **OpenTofu plan updated**\n\nThe infrastructure plan has been regenerated. Please review the updated changes above.\n\n*Updated at: ${new Date().toISOString()}*`
                 });
 
                 console.log(`✅ PR #${prNumber} updated successfully`);
@@ -311,7 +311,7 @@ jobs:
       - name: Generate Job Summary
         if: always()
         run: |
-          echo "## 📋 Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 OpenTofu Plan Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Status | Step | Result |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|------|--------|" >> $GITHUB_STEP_SUMMARY
@@ -323,7 +323,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📊 Workflow Details" >> $GITHUB_STEP_SUMMARY
           echo "- **Working Directory**: \`${{ env.TF_WORKING_DIR }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Terraform Version**: ${{ env.TERRAFORM_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **OpenTofu Version**: ${{ env.OPENTOFU_VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY

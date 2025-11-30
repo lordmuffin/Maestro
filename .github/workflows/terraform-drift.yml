@@ -11,7 +11,7 @@ permissions:
   issues: write
 
 env:
-  TERRAFORM_VERSION: '1.6.0'
+  OPENTOFU_VERSION: '1.10.0'
   WORKING_DIR: './terraform'
 
 jobs:
@@ -27,11 +27,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
         with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-          terraform_wrapper: false
+          tofu_version: ${{ env.OPENTOFU_VERSION }}
+          tofu_wrapper: false
 
       - name: Set Environment Secrets
         id: env_config
@@ -50,22 +50,22 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Terraform Init
+      - name: OpenTofu Init
         working-directory: ${{ env.WORKING_DIR }}
         env:
           TERRAFORM_STATE_BUCKET: ${{ vars.TERRAFORM_STATE_BUCKET }}
         run: |
-          terraform init \
+          tofu init \
             -backend-config="bucket=${TERRAFORM_STATE_BUCKET}" \
             -backend-config="prefix=terraform/state/${{ matrix.environment }}"
 
       - name: Select Workspace
         working-directory: ${{ env.WORKING_DIR }}
         run: |
-          terraform workspace select ${{ matrix.environment }} || {
+          tofu workspace select ${{ matrix.environment }} || {
             echo "⚠️ Workspace ${{ matrix.environment }} does not exist"
             echo "Creating workspace..."
-            terraform workspace new ${{ matrix.environment }}
+            tofu workspace new ${{ matrix.environment }}
           }
 
       - name: Detect Drift
@@ -82,7 +82,7 @@ jobs:
           TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
           TF_VAR_repos_config_file: 'repos.json'
         run: |
-          terraform plan \
+          tofu plan \
             -var-file="${{ steps.env_config.outputs.tfvars_file }}" \
             -detailed-exitcode \
             -no-color \
@@ -149,23 +149,23 @@ jobs:
 
             1. **Review the changes** shown in the plan output above
             2. **Determine if changes are desired:**
-               - If **YES**: Update Terraform configuration to match actual state
-               - If **NO**: Run \`terraform apply\` to revert manual changes
+               - If **YES**: Update OpenTofu configuration to match actual state
+               - If **NO**: Run \`tofu apply\` to revert manual changes
             3. **Apply the fix** via a Pull Request
-            4. **Prevent future drift:** Ensure all changes go through Terraform
+            4. **Prevent future drift:** Ensure all changes go through OpenTofu
 
             ### How to Fix
 
             \`\`\`bash
-            # Option 1: Import manual changes into Terraform
+            # Option 1: Import manual changes into OpenTofu
             cd terraform
-            terraform workspace select ${{ matrix.environment }}
+            tofu workspace select ${{ matrix.environment }}
             # Update .tf files to match actual state
-            terraform plan  # Verify no drift
+            tofu plan  # Verify no drift
             # Create PR with updated configuration
 
             # Option 2: Revert manual changes
-            terraform apply  # Reapply Terraform configuration
+            tofu apply  # Reapply OpenTofu configuration
             \`\`\`
 
             ---
@@ -203,15 +203,15 @@ jobs:
             **Next Steps:**
             1. Review the GitHub issue for drift details
             2. Determine if the changes are intentional
-            3. Either update Terraform config or revert the manual changes
-            4. Run 'terraform plan' to verify drift is resolved
+            3. Either update OpenTofu config or revert the manual changes
+            4. Run 'tofu plan' to verify drift is resolved
 
             **How to View Drift:**
             Run the following commands locally:
             ```
             cd terraform
-            terraform workspace select ${{ matrix.environment }}
-            terraform plan -var-file=environments/${{ matrix.environment }}.tfvars
+            tofu workspace select ${{ matrix.environment }}
+            tofu plan -var-file=environments/${{ matrix.environment }}.tfvars
             ```
 
             This is an automated notification from the Maestro drift detection workflow.
@@ -229,7 +229,7 @@ jobs:
           **Workspace:** \`${{ matrix.environment }}\`
           **Detection Time:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
-          ${{ steps.plan.outputs.status == 'drift-detected' && '### Actions Taken\n- ✅ GitHub issue created\n- ✅ Email notification sent\n- ✅ Drift report uploaded\n\n### Next Steps\n1. Review the created GitHub issue\n2. Investigate the source of drift\n3. Fix via Pull Request' || steps.plan.outputs.status == 'no-drift' && '### Next Steps\nNo action required. Infrastructure matches Terraform configuration.' || '### Error\nDrift detection failed. Check workflow logs.' }}
+          ${{ steps.plan.outputs.status == 'drift-detected' && '### Actions Taken\n- ✅ GitHub issue created\n- ✅ Email notification sent\n- ✅ Drift report uploaded\n\n### Next Steps\n1. Review the created GitHub issue\n2. Investigate the source of drift\n3. Fix via Pull Request' || steps.plan.outputs.status == 'no-drift' && '### Next Steps\nNo action required. Infrastructure matches OpenTofu configuration.' || '### Error\nDrift detection failed. Check workflow logs.' }}
           EOF
 
   summary:
@@ -245,7 +245,7 @@ jobs:
           # 🔍 Weekly Drift Detection Report
 
           **Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          **Workflow:** [Terraform Drift Detection](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          **Workflow:** [OpenTofu Drift Detection](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
           ## Environments Scanned
           - Staging
