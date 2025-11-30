@@ -117,12 +117,12 @@ data "archive_file" "function_source" {
   output_path = "${path.module}/.terraform/function-source.zip"
 
   source {
-    content  = file("${path.module}/main.py")
+    content  = file("${path.module}/../V2V2B/main.py")
     filename = "main.py"
   }
 
   source {
-    content  = file("${path.module}/requirements.txt")
+    content  = file("${path.module}/../V2V2B/requirements.txt")
     filename = "requirements.txt"
   }
 
@@ -159,7 +159,7 @@ data "archive_file" "function_source" {
 
   # Include repository configuration file
   source {
-    content  = file("${path.module}/${var.repos_config_file}")
+    content  = file("${path.module}/../V2V2B/${var.repos_config_file}")
     filename = "repos.json"
   }
 }
@@ -195,6 +195,7 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
     max_instance_count = var.max_instance_count
     min_instance_count = var.min_instance_count
     available_memory   = var.memory
+    available_cpu      = var.cpu
     timeout_seconds    = var.timeout_seconds
 
     environment_variables = merge(
@@ -206,7 +207,10 @@ resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
         KANBAN_FOLDER_ID         = var.kanban_folder_id
         DRIVE_POLL_INTERVAL      = tostring(var.drive_poll_interval)
         # Note: FUNCTION_URL is set via output after first deployment
-        FUNCTION_URL = var.function_url != "" ? var.function_url : "https://${var.region}-${var.gcp_project}.cloudfunctions.net/${var.function_name}"
+        FUNCTION_URL     = var.function_url != "" ? var.function_url : "https://${var.region}-${var.gcp_project}.cloudfunctions.net/${var.function_name}"
+        BEYOND_REPO_NAME = var.beyond_repo_name
+        LOGS_WHITELIST   = var.logs_whitelist
+        FUNCTION_NAME    = var.function_name
       },
       # Add per-repository GitHub tokens
       {
@@ -289,7 +293,7 @@ resource "google_firebaserules_ruleset" "firestore" {
   source {
     files {
       name    = "firestore.rules"
-      content = file("${path.module}/firestore.rules")
+      content = file("${path.module}/../V2V2B/firestore.rules")
     }
   }
 
