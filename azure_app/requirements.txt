@@ -1,0 +1,11 @@
+azure-functions
+azure-cosmos
+azure-identity
+azure-keyvault-secrets
+google-generativeai
+google-api-python-client
+python-telegram-bot
+requests
+PyGithub
+python-multipart
+pytest
