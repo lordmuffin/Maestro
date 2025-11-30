@@ -178,20 +178,16 @@ jobs:
           fi
         continue-on-error: true
 
-      - name: Create Deployment Tag
-        if: steps.apply.outcome == 'success'
+      - name: 🏷️ Generate DORA Deployment Tag
+        if: success() # Only tag if the previous deployment steps worked
         run: |
-          TAG_NAME="deploy-prod-$(date +%Y%m%d-%H%M%S)"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG_NAME" -m "Production deployment
-
-          Commit: ${{ github.sha }}
-          Function: ${{ steps.outputs.outputs.function_name }}
-          URL: ${{ steps.outputs.outputs.function_url }}
-          Deployed by: @${{ github.actor }}"
-          git push origin "$TAG_NAME"
-          echo "✅ Created deployment tag: $TAG_NAME"
+          # Generate a tag format: deploy-prod-YYYYMMDD-HHMMSS
+          TAG_NAME="deploy-prod-$(date +'%Y%m%d-%H%M%S')"
+          echo "Creating release tag: $TAG_NAME"
+          
+          # Tag the commit that just deployed
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
 
       - name: Rollback on Failure
         if: steps.apply.outcome == 'failure'
