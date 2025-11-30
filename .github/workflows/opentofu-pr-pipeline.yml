@@ -32,6 +32,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: terraform-plan
 
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -303,6 +309,10 @@ jobs:
                 console.log('ℹ️ No changes detected between branches');
               } else if (error.message.includes('A pull request already exists')) {
                 console.log('ℹ️ PR already exists, attempting to update...');
+              } else if (error.message.includes('GitHub Actions is not permitted to create or approve pull requests')) {
+                console.error('🚫 PERMISSION ERROR: This repository does not allow GitHub Actions to create PRs.');
+                console.error('👉 Please go to Settings > Actions > General > Workflow permissions and check "Allow GitHub Actions to create and approve pull requests".');
+                throw error;
               } else {
                 throw error;
               }

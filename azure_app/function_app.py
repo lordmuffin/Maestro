@@ -15,8 +15,6 @@ from pathlib import Path
 import asyncio
 import requests
 from io import BytesIO
-from email.parser import BytesParser
-from email.policy import default as email_default
 
 import azure.functions as func
 from azure.cosmos import CosmosClient
@@ -1022,39 +1020,43 @@ def upload_file_handler(req: func.HttpRequest) -> func.HttpResponse:
         session_id = req.params.get('session')
         if not session_id: return func.HttpResponse("Missing session ID", status_code=400)
 
+        # Use multipart parsing from multipart library
+        from multipart import MultipartParser
+
         content_type = req.headers.get('Content-Type', '')
         if 'multipart/form-data' not in content_type:
              return func.HttpResponse("Invalid Content-Type", status_code=400)
 
-        # Parse multipart body using standard email library
-        # This avoids issues with external libraries like python-multipart in this context
+        # Parse body
+        try:
+            boundary = content_type.split("boundary=")[1]
+            # Convert body to bytes for stream
+            body = req.get_body()
+            stream = BytesIO(body)
 
-        # 1. Prepend headers to make it look like an email message
-        body_bytes = req.get_body()
-        headers = f"Content-Type: {content_type}\r\n".encode('utf-8')
-        msg_bytes = headers + b"\r\n" + body_bytes
+            # Create multipart parser
+            parser = MultipartParser(stream, boundary)
 
-        # 2. Parse using BytesParser
-        parser = BytesParser(policy=email_default)
-        msg = parser.parsebytes(msg_bytes)
+            file_data = None
+            filename = "uploaded_file"
+            file_ctype = "application/octet-stream"
 
-        file_data = None
-        filename = "uploaded_file"
-        file_ctype = "application/octet-stream"
+            # Iterate through parts
+            for part in parser:
+                if part.filename:
+                    filename = part.filename
+                    file_ctype = part.content_type
+                    # Read part content
+                    # Note: python-multipart API varies, assuming part.file or part.value
+                    if hasattr(part, 'file'):
+                        file_data = part.file.read()
+                    elif hasattr(part, 'value'):
+                        file_data = part.value
+                    break # Assuming single file upload
 
-        # 3. Iterate parts to find the file
-        if msg.is_multipart():
-            for part in msg.iter_parts():
-                # Check Content-Disposition
-                disposition = part.get_content_disposition()
-                if disposition == 'form-data':
-                    # Check if it's the file field (usually named 'file') or has a filename
-                    part_filename = part.get_filename()
-                    if part_filename:
-                        filename = part_filename
-                        file_ctype = part.get_content_type()
-                        file_data = part.get_payload(decode=True)
-                        break
+        except Exception as parse_error:
+            logger.error(f"Multipart parse error: {parse_error}")
+            return func.HttpResponse(f"Parsing error: {parse_error}", status_code=400)
 
         if file_data:
             handler = UploadHandler()
@@ -1079,7 +1081,3 @@ def get_upload_ui_html(session_id: str) -> str:
     </body>
     </html>
     """
-
-def get_prompt(prompt_name: str) -> str:
-    # Logic to load prompt from file or return default
-    return load_prompt(prompt_name)

@@ -94,7 +94,7 @@ jobs:
           tofu import \
             -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
             google_service_account.function_sa \
-            "projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/v2v2b-interrogator-${{ env.ENVIRONMENT }}-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            "projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/v2v2b-interrogator-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             2>&1 | grep -v "Enter a value" || echo "⚠️ Service account not imported (may already be in state or not exist)"
 
           # Import Firestore rules release (ignore errors if doesn't exist or already in state)
@@ -108,14 +108,14 @@ jobs:
           tofu import \
             -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
             google_cloudfunctions2_function.v2v2b_interrogator \
-            "projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/functions/v2v2b-interrogator-${{ env.ENVIRONMENT }}" \
+            "projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/functions/v2v2b-interrogator" \
             2>&1 | grep -v "Enter a value" || echo "⚠️ Cloud Function not imported (may already be in state or not exist)"
 
           # Import Cloud Run IAM member (ignore errors if doesn't exist or already in state)
           tofu import \
             -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
             google_cloud_run_service_iam_member.public_access \
-            "v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/services/v2v2b-interrogator-${{ env.ENVIRONMENT }} roles/run.invoker allUsers" \
+            "v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/services/v2v2b-interrogator roles/run.invoker allUsers" \
             2>&1 | grep -v "Enter a value" || echo "⚠️ Cloud Run IAM member not imported (may already be in state or not exist)"
 
           echo "✅ Import step complete"
@@ -178,20 +178,16 @@ jobs:
           fi
         continue-on-error: true
 
-      - name: Create Deployment Tag
-        if: steps.apply.outcome == 'success'
+      - name: 🏷️ Generate DORA Deployment Tag
+        if: success() # Only tag if the previous deployment steps worked
         run: |
-          TAG_NAME="deploy-prod-$(date +%Y%m%d-%H%M%S)"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG_NAME" -m "Production deployment
-
-          Commit: ${{ github.sha }}
-          Function: ${{ steps.outputs.outputs.function_name }}
-          URL: ${{ steps.outputs.outputs.function_url }}
-          Deployed by: @${{ github.actor }}"
-          git push origin "$TAG_NAME"
-          echo "✅ Created deployment tag: $TAG_NAME"
+          # Generate a tag format: deploy-prod-YYYYMMDD-HHMMSS
+          TAG_NAME="deploy-prod-$(date +'%Y%m%d-%H%M%S')"
+          echo "Creating release tag: $TAG_NAME"
+          
+          # Tag the commit that just deployed
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
 
       - name: Rollback on Failure
         if: steps.apply.outcome == 'failure'

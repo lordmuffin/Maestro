@@ -55,6 +55,12 @@ variable "memory" {
   }
 }
 
+variable "cpu" {
+  description = "CPU allocation for the Cloud Function"
+  type        = string
+  default     = "1"
+}
+
 variable "timeout_seconds" {
   description = "Maximum execution time for the function in seconds"
   type        = number
@@ -131,4 +137,16 @@ variable "drive_poll_interval" {
     condition     = var.drive_poll_interval >= 60 && var.drive_poll_interval <= 3600
     error_message = "Poll interval must be between 60 and 3600 seconds"
   }
+}
+
+variable "beyond_repo_name" {
+  description = "Repository name for 'Beyond' project"
+  type        = string
+  default     = "lordmuffin/beyond"
+}
+
+variable "logs_whitelist" {
+  description = "Comma-separated list of users/IDs whitelisted for logs"
+  type        = string
+  default     = ""
 }

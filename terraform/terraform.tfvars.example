@@ -20,6 +20,12 @@ github_tokens = {
 # Repository configuration file (relative to terraform directory)
 repos_config_file = "repos.json"
 
+# Repository name for 'Beyond' project
+beyond_repo_name = "lordmuffin/beyond"
+
+# Comma-separated list of users/IDs whitelisted for logs
+logs_whitelist = ""
+
 # ========================================
 # Google Drive Integration (Optional)
 # ========================================
