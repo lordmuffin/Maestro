@@ -392,7 +392,38 @@ class GeminiClient:
         ensure_genai_initialized()
         self.model = genai.GenerativeModel("gemini-1.5-flash")
 
-    def chat_response(self, user_message: str, history: List[Dict[str, str]], session_data: Optional[Dict[str, Any]] = None) -> str:
+    def decide_if_search_needed(self, history: List[Dict[str, str]], user_message: str) -> Optional[str]:
+        """Decide if a search is needed based on history and user message."""
+        try:
+            decision_prompt = get_prompt('search_decision_prompt.md')
+
+            # Simplified history for decision context
+            context_str = "Conversation History:\n"
+            # Get last 5 messages to save tokens but provide context
+            recent = history[-5:] if history else []
+            for msg in recent:
+                context_str += f"{msg['role'].upper()}: {msg['content']}\n"
+
+            context_str += f"\nUSER'S LATEST MESSAGE: {user_message}\n"
+
+            prompt = f"{decision_prompt}\n\n{context_str}"
+
+            # Use generate_content for single turn
+            response = self.model.generate_content(prompt)
+            result = response.text.strip()
+
+            logger.info(f"Search Decision: {result}")
+
+            if result.startswith("SEARCH:"):
+                query = result.replace("SEARCH:", "").strip()
+                return query
+            return None
+
+        except Exception as e:
+            logger.error(f"Error in decision logic: {e}")
+            return None
+
+    def chat_response(self, user_message: str, history: List[Dict[str, str]], session_data: Optional[Dict[str, Any]] = None, search_context: str = None) -> str:
         """Generate a chat response with context."""
         try:
             # Construct context
@@ -401,6 +432,9 @@ class GeminiClient:
             full_context = f"{system_prompt}\n"
             if session_data:
                 full_context += f"\nSession Data:\n{json.dumps(session_data, indent=2)}\n"
+
+            if search_context:
+                full_context += f"\n\n### KNOWLEDGE BASE SEARCH RESULTS ###\n{search_context}\n### END SEARCH RESULTS ###\n"
 
             # Mapping history for start_chat
             genai_history = []
@@ -562,8 +596,14 @@ class RepositoryConfig:
 class GitHubConfigManager:
     _instance = None
     def __init__(self, config_path: str = None):
-        # Assuming repos.json is in same directory as function app
-        if config_path is None: config_path = os.path.join(os.path.dirname(__file__), 'repos.json')
+        if config_path is None:
+            # Try current directory first
+            path = os.path.join(os.path.dirname(__file__), 'repos.json')
+            if not os.path.exists(path):
+                # Try parent directory (common in some deployments or dev structures)
+                path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'repos.json')
+            config_path = path
+
         self.config_path = config_path
         self.repositories = {}
         self.routing_rules = {}
@@ -617,6 +657,46 @@ class GitHubManager:
     def _get_repo_for_operation(self, operation: str, repo_label: Optional[str] = None, repo_name: Optional[str] = None) -> RepositoryConfig:
         if repo_label or repo_name: return self.config_manager.get_repo_config(label=repo_label, name=repo_name)
         return self.config_manager.get_default_repo_for_operation(operation)
+
+    def search_all_repos(self, query: str) -> str:
+        """Search across all configured repositories."""
+        results_summary = []
+        try:
+            for repo_config in self.config_manager.repositories.values():
+                try:
+                    repo = repo_config.get_repo()
+                    logger.info(f"Searching repo {repo.name} for: {query}")
+
+                    # Using code search
+                    # Note: GitHub Search API has rate limits
+                    code_results = self.config_manager._instance.repositories[repo_config.label].get_github_client().search_code(f"{query} repo:{repo.name}")
+
+                    count = 0
+                    for content_file in code_results:
+                        if count >= 2: break # Limit per repo
+
+                        try:
+                            file_content = content_file.decoded_content.decode('utf-8')
+                            # Truncate content
+                            if len(file_content) > 1000:
+                                file_content = file_content[:1000] + "...(truncated)"
+
+                            results_summary.append(f"--- FILE: {content_file.name} (Repo: {repo.name}) ---\n{file_content}\n")
+                            count += 1
+                        except Exception as decode_err:
+                             logger.warning(f"Could not decode file {content_file.name}: {decode_err}")
+
+                except Exception as repo_err:
+                    logger.warning(f"Error searching repo {repo_config.name}: {repo_err}")
+
+        except Exception as e:
+             logger.error(f"Global search error: {e}")
+             return f"Error performing search: {e}"
+
+        if not results_summary:
+            return "No relevant results found in Knowledge Base."
+
+        return "\n".join(results_summary)
 
     def create_pr_from_session(self, session_id: str, history: List[Dict[str, str]], repo_label: str = None) -> str:
         repo_config = self._get_repo_for_operation('sessions', repo_label)
@@ -881,8 +961,25 @@ class BotHandlers:
         # Get history
         history = await loop.run_in_executor(None, CosmosDBManager.get_session_history, session_id)
 
+        # 1. Agentic Decision: Do we need to search?
+        search_query = await loop.run_in_executor(None, self.gemini.decide_if_search_needed, history, text)
+
+        search_context = None
+        if search_query:
+            await update.message.reply_text(f"🔍 Checking knowledge base for: {search_query}...")
+            # 2. Perform Search
+            # We use a wrapper to handle potential timeouts if needed, though requests has timeouts
+            try:
+                search_context = await asyncio.wait_for(
+                    loop.run_in_executor(None, self.github_manager.search_all_repos, search_query),
+                    timeout=10.0
+                )
+            except asyncio.TimeoutError:
+                search_context = "Search timed out."
+                logger.warning("Search timed out")
+
         # Generate response
-        response = await loop.run_in_executor(None, self.gemini.chat_response, text, history)
+        response = await loop.run_in_executor(None, self.gemini.chat_response, text, history, None, search_context)
 
         # Save and send response
         await loop.run_in_executor(None, CosmosDBManager.save_message, session_id, 'model', response, str(update.effective_chat.id))
