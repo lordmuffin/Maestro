@@ -4,7 +4,8 @@ on:
   push:
     branches: [develop]
     paths:
-      - 'terraform/**'
+      - 'opentofu/**'
+      - 'V2V2B/**'
       - '.github/workflows/opentofu-apply-staging.yml'
 
 permissions:
@@ -14,7 +15,7 @@ permissions:
 
 env:
   OPENTOFU_VERSION: '1.10.0'
-  WORKING_DIR: './terraform'
+  WORKING_DIR: './opentofu'
   ENVIRONMENT: 'staging'
 
 jobs:
@@ -44,7 +45,7 @@ jobs:
         run: |
           tofu init \
             -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
-            -backend-config="prefix=terraform/state/${{ env.ENVIRONMENT }}"
+            -backend-config="prefix=opentofu/state/${{ env.ENVIRONMENT }}"
 
       - name: Select Staging Workspace
         working-directory: ${{ env.WORKING_DIR }}
