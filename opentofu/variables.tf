@@ -1,16 +1,28 @@
-variable "gcp_project" {
-  description = "The GCP project ID where resources will be created"
+variable "azure_subscription_id" {
+  description = "The Azure Subscription ID"
   type        = string
 }
 
-variable "region" {
-  description = "The GCP region for resource deployment"
+variable "location" {
+  description = "The Azure region for resource deployment"
   type        = string
-  default     = "us-central1"
+  default     = "eastus"
+}
+
+variable "environment" {
+  description = "Environment name (e.g., staging, production)"
+  type        = string
+  default     = "staging"
+}
+
+variable "resource_group_name" {
+  description = "Name of the resource group (optional, can be auto-generated)"
+  type        = string
+  default     = ""
 }
 
 variable "function_name" {
-  description = "Name of the Cloud Function"
+  description = "Name of the Azure Function App"
   type        = string
   default     = "v2v2b-interrogator"
 }
@@ -19,11 +31,12 @@ variable "github_tokens" {
   description = "Map of GitHub tokens for each repository (key: repo label, value: token)"
   type        = map(string)
   sensitive   = true
+}
 
-  validation {
-    condition     = length(var.github_tokens) > 0
-    error_message = "At least one GitHub token must be provided"
-  }
+variable "telegram_bot_token" {
+  description = "Telegram Bot Token"
+  type        = string
+  sensitive   = true
 }
 
 variable "repos_config_file" {
@@ -32,121 +45,52 @@ variable "repos_config_file" {
   default     = "repos.json"
 }
 
-variable "telegram_bot_token" {
-  description = "Telegram Bot Token obtained from @BotFather"
+# Cosmos DB variables (formerly Firestore)
+variable "cosmos_db_name" {
+  description = "Name of the Cosmos DB account"
   type        = string
-  sensitive   = true
+  default     = "" # If empty, will generate one
 }
 
-variable "function_url" {
-  description = "The URL of the deployed function (auto-populated after first deployment)"
+# Storage Account for Function
+variable "storage_account_name" {
+  description = "Name of the storage account for the function app"
   type        = string
-  default     = ""
+  default     = "" # If empty, will generate one
 }
 
-variable "memory" {
-  description = "Memory allocation for the Cloud Function"
+# App Service Plan
+variable "service_plan_sku" {
+  description = "The SKU for the App Service Plan (e.g., B1, Y1 for consumption)"
   type        = string
-  default     = "512Mi"
-
-  validation {
-    condition     = can(regex("^[0-9]+(Mi|Gi)$", var.memory))
-    error_message = "Memory must be specified in Mi or Gi (e.g., 512Mi, 1Gi)"
-  }
+  default     = "Y1" # Consumption plan
 }
 
-variable "cpu" {
-  description = "CPU allocation for the Cloud Function"
-  type        = string
-  default     = "1"
-}
-
-variable "timeout_seconds" {
-  description = "Maximum execution time for the function in seconds"
-  type        = number
-  default     = 540
-
-  validation {
-    condition     = var.timeout_seconds >= 1 && var.timeout_seconds <= 3600
-    error_message = "Timeout must be between 1 and 3600 seconds"
-  }
-}
-
-variable "max_instance_count" {
-  description = "Maximum number of function instances"
-  type        = number
-  default     = 10
-
-  validation {
-    condition     = var.max_instance_count >= 1 && var.max_instance_count <= 1000
-    error_message = "Max instance count must be between 1 and 1000"
-  }
-}
-
-variable "min_instance_count" {
-  description = "Minimum number of function instances (0 for scale-to-zero)"
-  type        = number
-  default     = 0
-
-  validation {
-    condition     = var.min_instance_count >= 0 && var.min_instance_count <= 100
-    error_message = "Min instance count must be between 0 and 100"
-  }
-}
-
-variable "deploy_firestore_rules" {
-  description = "Whether to deploy Firestore security rules"
-  type        = bool
-  default     = true
-}
-
-variable "labels" {
-  description = "Labels to apply to resources"
-  type        = map(string)
-  default = {
-    application = "v2v2b-interrogator"
-    managed-by  = "terraform"
-    environment = "production"
-  }
-}
-
-variable "google_drive_folder_id" {
-  description = "Google Drive folder ID to monitor for transcripts (.txt, .m4a files)"
-  type        = string
-  default     = ""
-}
-
-variable "obsidian_drive_folder_id" {
-  description = "Google Drive folder ID for Obsidian vault (where summaries are synced)"
-  type        = string
-  default     = ""
-}
-
-variable "kanban_folder_id" {
-  description = "Google Drive folder ID for Kanban board folder"
-  type        = string
-  default     = ""
-}
-
-variable "drive_poll_interval" {
-  description = "Seconds between Drive folder checks (only used if webhooks fail)"
-  type        = number
-  default     = 300
-
-  validation {
-    condition     = var.drive_poll_interval >= 60 && var.drive_poll_interval <= 3600
-    error_message = "Poll interval must be between 60 and 3600 seconds"
-  }
-}
-
-variable "beyond_repo_name" {
-  description = "Repository name for 'Beyond' project"
-  type        = string
-  default     = "lordmuffin/beyond"
-}
-
+# Whitelist variable kept from GCP config
 variable "logs_whitelist" {
   description = "Comma-separated list of users/IDs whitelisted for logs"
   type        = string
   default     = ""
+}
+
+# Drive folder IDs kept consistent (application vars)
+variable "google_drive_folder_id" {
+  type    = string
+  default = ""
+}
+variable "obsidian_drive_folder_id" {
+  type    = string
+  default = ""
+}
+variable "kanban_folder_id" {
+  type    = string
+  default = ""
+}
+variable "drive_poll_interval" {
+  type    = number
+  default = 300
+}
+variable "beyond_repo_name" {
+  type    = string
+  default = "lordmuffin/beyond"
 }

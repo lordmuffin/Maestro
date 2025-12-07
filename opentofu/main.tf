@@ -1,316 +1,205 @@
-# Prerequisites:
-# IMPORTANT: The following must be completed before running OpenTofu (or Terraform):
-#
-# 1. BILLING ACCOUNT: Enable billing for the GCP project
-#    - Go to: https://console.cloud.google.com/billing/linkedaccount?project=<PROJECT_ID>
-#    - Associate a valid billing account with the project
-#    - Required for Cloud Build, Cloud Run, Cloud Storage, and other paid services
-#
-# 2. ENABLE BOOTSTRAP APIs: Manually enable these APIs first
-#    - Service Usage API (serviceusage.googleapis.com)
-#    - Identity and Access Management (IAM) API (iam.googleapis.com)
-#    Via gcloud: gcloud services enable serviceusage.googleapis.com iam.googleapis.com --project=<PROJECT_ID>
-#    Via Console: https://console.developers.google.com/apis/api/serviceusage.googleapis.com/overview
-#
-# 3. SERVICE ACCOUNT PERMISSIONS: Grant required roles to the deployment service account
-#    Required roles for the service account used by GitHub Actions:
-#    - roles/editor (Project Editor) OR roles/owner (Project Owner)
-#    - roles/serviceusage.serviceUsageAdmin (Service Usage Admin)
-#    - roles/iam.serviceAccountAdmin (Service Account Admin) 
-#    - roles/resourcemanager.projectIamAdmin (Project IAM Admin)
-#
-#    Grant roles via: 
-#    gcloud projects add-iam-policy-binding <PROJECT_ID> --member='serviceAccount:<SA_EMAIL>' --role='<ROLE>'
-
 terraform {
   required_version = ">= 1.0"
 
   required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.0"
     }
     archive = {
       source  = "hashicorp/archive"
       version = "~> 2.4"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 }
 
-provider "google" {
-  project = var.gcp_project
-  region  = var.region
+provider "azurerm" {
+  features {
+    resource_group {
+      prevent_deletion_if_contains_resources = false
+    }
+  }
+  subscription_id = var.azure_subscription_id
 }
 
-# Enable required APIs
-# Note: Service Usage API and IAM API must be manually enabled in the GCP Console first
-# or through gcloud CLI before running OpenTofu/Terraform
-
-resource "google_project_service" "cloud_functions" {
-  service            = "cloudfunctions.googleapis.com"
-  disable_on_destroy = false
+# Random string for unique naming if needed
+resource "random_string" "unique_id" {
+  length  = 6
+  special = false
+  upper   = false
 }
 
-resource "google_project_service" "cloud_build" {
-  service            = "cloudbuild.googleapis.com"
-  disable_on_destroy = false
+locals {
+  # Generate names if not provided
+  rg_name     = var.resource_group_name != "" ? var.resource_group_name : "rg-${var.function_name}-${var.environment}"
+  sa_name     = var.storage_account_name != "" ? var.storage_account_name : "st${replace(var.function_name, "-", "")}${random_string.unique_id.result}"
+  cosmos_name = var.cosmos_db_name != "" ? var.cosmos_db_name : "cosmos-${var.function_name}-${var.environment}-${random_string.unique_id.result}"
+
+  # Function App name needs to be globally unique
+  func_app_name = "${var.function_name}-${var.environment}-${random_string.unique_id.result}"
 }
 
-resource "google_project_service" "firestore" {
-  service            = "firestore.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "aiplatform" {
-  service            = "aiplatform.googleapis.com"
-  disable_on_destroy = false
-}
-
-
-resource "google_project_service" "cloud_run" {
-  service            = "run.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "drive" {
-  service            = "drive.googleapis.com"
-  disable_on_destroy = false
-}
-
-# Create Firestore Database (only if it doesn't exist)
-resource "google_firestore_database" "database" {
-  project     = var.gcp_project
-  name        = "(default)"
-  location_id = var.region
-  type        = "FIRESTORE_NATIVE"
-
-  depends_on = [google_project_service.firestore]
-
-  # Prevent destruction of existing database
-  lifecycle {
-    prevent_destroy = false
-    ignore_changes  = [name]
+# Resource Group
+resource "azurerm_resource_group" "rg" {
+  name     = local.rg_name
+  location = var.location
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "OpenTofu"
   }
 }
 
-# Create a GCS bucket for function source code
-resource "google_storage_bucket" "function_bucket" {
-  name          = "${var.gcp_project}-v2v2b-function-source"
-  location      = var.region
-  force_destroy = true
-
-  uniform_bucket_level_access = true
-  public_access_prevention    = "enforced"
-
-  versioning {
-    enabled = true
-  }
-
-  # checkov:skip=CKV_GCP_62:Log access not required for temporary deployment artifacts
-
-  depends_on = [google_project_service.cloud_functions]
+# Storage Account (Required for Function App)
+resource "azurerm_storage_account" "sa" {
+  name                     = local.sa_name
+  resource_group_name      = azurerm_resource_group.rg.name
+  location                 = azurerm_resource_group.rg.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
 }
 
-# Create ZIP archive of function source code
+# Application Insights (for monitoring)
+resource "azurerm_application_insights" "app_insights" {
+  name                = "api-${var.function_name}-${var.environment}"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  application_type    = "web"
+}
+
+# App Service Plan (Consumption)
+resource "azurerm_service_plan" "asp" {
+  name                = "asp-${var.function_name}-${var.environment}"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  os_type             = "Linux"
+  sku_name            = var.service_plan_sku
+}
+
+# Packaging the function code
 data "archive_file" "function_source" {
   type        = "zip"
   output_path = "${path.module}/.terraform/function-source.zip"
 
   source {
-    content  = file("${path.module}/../V2V2B/main.py")
-    filename = "main.py"
+    content  = file("${path.module}/../V2V2B/function_app.py")
+    filename = "function_app.py"
   }
-
   source {
     content  = file("${path.module}/../V2V2B/requirements.txt")
     filename = "requirements.txt"
   }
-
-  # Include prompt files
-  source {
-    content  = file("${path.module}/../prompts/telegram_chat_prompt.md")
-    filename = "prompts/telegram_chat_prompt.md"
-  }
-
-  source {
-    content  = file("${path.module}/../prompts/multimodal_analysis_prompt.md")
-    filename = "prompts/multimodal_analysis_prompt.md"
-  }
-
-  source {
-    content  = file("${path.module}/../prompts/transcript_analysis_prompt.md")
-    filename = "prompts/transcript_analysis_prompt.md"
-  }
-
-  source {
-    content  = file("${path.module}/../prompts/interrogation_questions_prompt.md")
-    filename = "prompts/interrogation_questions_prompt.md"
-  }
-
-  source {
-    content  = file("${path.module}/../prompts/interviewer_prompt.md")
-    filename = "prompts/interviewer_prompt.md"
-  }
-
-  source {
-    content  = file("${path.module}/../prompts/file_validation_prompt.md")
-    filename = "prompts/file_validation_prompt.md"
-  }
-
-  # Include repository configuration file
   source {
     content  = file("${path.module}/../V2V2B/${var.repos_config_file}")
     filename = "repos.json"
   }
-}
 
-# Upload function source to GCS
-resource "google_storage_bucket_object" "function_source" {
-  name   = "function-source-${data.archive_file.function_source.output_md5}.zip"
-  bucket = google_storage_bucket.function_bucket.name
-  source = data.archive_file.function_source.output_path
-}
-
-# Create the Cloud Function (Gen 2)
-resource "google_cloudfunctions2_function" "v2v2b_interrogator" {
-  name        = var.function_name
-  location    = var.region
-  description = "V2V2B Interrogator - Telegram Bot for Technical Content Extraction"
-
-  # checkov:skip=CKV_GCP_124:Telegram webhook requires public ingress
-
-  build_config {
-    runtime     = "python311"
-    entry_point = "entry_point"
-
-    source {
-      storage_source {
-        bucket = google_storage_bucket.function_bucket.name
-        object = google_storage_bucket_object.function_source.name
-      }
-    }
-  }
-
-  service_config {
-    max_instance_count = var.max_instance_count
-    min_instance_count = var.min_instance_count
-    available_memory   = var.memory
-    available_cpu      = var.cpu
-    timeout_seconds    = var.timeout_seconds
-
-    environment_variables = merge(
-      {
-        GCP_PROJECT              = var.gcp_project
-        TELEGRAM_BOT_TOKEN       = var.telegram_bot_token
-        GOOGLE_DRIVE_FOLDER_ID   = var.google_drive_folder_id
-        OBSIDIAN_DRIVE_FOLDER_ID = var.obsidian_drive_folder_id
-        KANBAN_FOLDER_ID         = var.kanban_folder_id
-        DRIVE_POLL_INTERVAL      = tostring(var.drive_poll_interval)
-        # Note: FUNCTION_URL is set via output after first deployment
-        FUNCTION_URL     = var.function_url != "" ? var.function_url : "https://${var.region}-${var.gcp_project}.cloudfunctions.net/${var.function_name}"
-        BEYOND_REPO_NAME = var.beyond_repo_name
-        LOGS_WHITELIST   = var.logs_whitelist
-        FUNCTION_NAME    = var.function_name
-      },
-      # Add per-repository GitHub tokens
-      {
-        for label, token in var.github_tokens :
-        "GITHUB_TOKEN_${upper(label)}" => token
-      }
-    )
-
-    ingress_settings               = "ALLOW_ALL"
-    all_traffic_on_latest_revision = true
-
-    service_account_email = google_service_account.function_sa.email
-  }
-
-  depends_on = [
-    google_project_service.cloud_functions,
-    google_project_service.cloud_build,
-    google_project_service.cloud_run,
-    google_firestore_database.database
-  ]
-}
-
-# Create service account for the function
-resource "google_service_account" "function_sa" {
-  account_id   = "${var.function_name}-sa"
-  display_name = "Service Account for V2V2B Interrogator Function"
-}
-
-# Grant necessary IAM roles to the service account
-resource "google_project_iam_member" "firestore_user" {
-  project = var.gcp_project
-  role    = "roles/datastore.user"
-  member  = "serviceAccount:${google_service_account.function_sa.email}"
-}
-
-resource "google_project_iam_member" "aiplatform_user" {
-  project = var.gcp_project
-  role    = "roles/aiplatform.user"
-  member  = "serviceAccount:${google_service_account.function_sa.email}"
-}
-
-# Note: For Telegram webhook, the function only needs to be publicly accessible
-# via google_cloud_run_service_iam_member.public_access
-
-resource "google_project_iam_member" "logging_writer" {
-  project = var.gcp_project
-  role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.function_sa.email}"
-}
-
-resource "google_project_iam_member" "logging_viewer" {
-  project = var.gcp_project
-  role    = "roles/logging.viewer"
-  member  = "serviceAccount:${google_service_account.function_sa.email}"
-}
-
-# Google Drive Access:
-# Note: Drive access is granted by sharing specific Drive folders with the service account.
-# There is no project-level IAM role for Drive access. Instead:
-# 1. Get the service account email: terraform output service_account_email
-# 2. Share your Drive folders with this email address:
-#    - Transcript folder: Grant "Viewer" access
-#    - Obsidian folder: Grant "Editor" access
-# The Drive API service must be enabled (handled by google_project_service.drive)
-
-# Allow unauthenticated access to the function (for Telegram webhook)
-resource "google_cloud_run_service_iam_member" "public_access" {
-  # checkov:skip=CKV_GCP_102:Telegram webhook requires public access
-  project  = google_cloudfunctions2_function.v2v2b_interrogator.project
-  location = google_cloudfunctions2_function.v2v2b_interrogator.location
-  service  = google_cloudfunctions2_function.v2v2b_interrogator.name
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
-
-# Optional: Deploy Firestore security rules
-resource "google_firebaserules_ruleset" "firestore" {
-  count = var.deploy_firestore_rules ? 1 : 0
-
+  # Include Prompts
   source {
-    files {
-      name    = "firestore.rules"
-      content = file("${path.module}/../V2V2B/firestore.rules")
+    content  = file("${path.module}/../prompts/telegram_chat_prompt.md")
+    filename = "prompts/telegram_chat_prompt.md"
+  }
+  source {
+    content  = file("${path.module}/../prompts/multimodal_analysis_prompt.md")
+    filename = "prompts/multimodal_analysis_prompt.md"
+  }
+  source {
+    content  = file("${path.module}/../prompts/transcript_analysis_prompt.md")
+    filename = "prompts/transcript_analysis_prompt.md"
+  }
+  source {
+    content  = file("${path.module}/../prompts/interrogation_questions_prompt.md")
+    filename = "prompts/interrogation_questions_prompt.md"
+  }
+  source {
+    content  = file("${path.module}/../prompts/interviewer_prompt.md")
+    filename = "prompts/interviewer_prompt.md"
+  }
+  source {
+    content  = file("${path.module}/../prompts/file_validation_prompt.md")
+    filename = "prompts/file_validation_prompt.md"
+  }
+}
+
+# Function App (Linux)
+resource "azurerm_linux_function_app" "function_app" {
+  name                = local.func_app_name
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  service_plan_id     = azurerm_service_plan.asp.id
+
+  storage_account_name       = azurerm_storage_account.sa.name
+  storage_account_access_key = azurerm_storage_account.sa.primary_access_key
+
+  site_config {
+    application_stack {
+      python_version = "3.11"
     }
+    application_insights_key = azurerm_application_insights.app_insights.instrumentation_key
   }
 
-  depends_on = [google_firestore_database.database]
+  app_settings = merge(
+    {
+      "FUNCTIONS_WORKER_RUNTIME" = "python"
+      "AzureWebJobsStorage"      = azurerm_storage_account.sa.primary_connection_string
+      "TELEGRAM_BOT_TOKEN"       = var.telegram_bot_token
+      "GOOGLE_DRIVE_FOLDER_ID"   = var.google_drive_folder_id
+      "OBSIDIAN_DRIVE_FOLDER_ID" = var.obsidian_drive_folder_id
+      "KANBAN_FOLDER_ID"         = var.kanban_folder_id
+      "DRIVE_POLL_INTERVAL"      = tostring(var.drive_poll_interval)
+      "BEYOND_REPO_NAME"         = var.beyond_repo_name
+      "LOGS_WHITELIST"           = var.logs_whitelist
+
+      # Cosmos DB Connection
+      "COSMOS_DB_ENDPOINT" = azurerm_cosmosdb_account.db_account.endpoint
+      "COSMOS_DB_KEY"      = azurerm_cosmosdb_account.db_account.primary_key
+      "COSMOS_DB_DATABASE" = "v2v2b-db"
+    },
+    {
+      for label, token in var.github_tokens :
+      "GITHUB_TOKEN_${upper(label)}" => token
+    }
+  )
+
+  # For zip deployment
+  zip_deploy_file = data.archive_file.function_source.output_path
 }
 
-resource "google_firebaserules_release" "firestore" {
-  count = var.deploy_firestore_rules ? 1 : 0
+# Cosmos DB Account
+resource "azurerm_cosmosdb_account" "db_account" {
+  name                = local.cosmos_name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  offer_type          = "Standard"
+  kind                = "GlobalDocumentDB" # SQL API
 
-  name         = "cloud.firestore"
-  ruleset_name = google_firebaserules_ruleset.firestore[0].name
+  consistency_policy {
+    consistency_level = "Session"
+  }
 
-  depends_on = [google_firebaserules_ruleset.firestore]
-
-  lifecycle {
-    replace_triggered_by = [
-      google_firebaserules_ruleset.firestore
-    ]
+  geo_location {
+    location          = azurerm_resource_group.rg.location
+    failover_priority = 0
   }
 }
+
+# Cosmos DB Database
+resource "azurerm_cosmosdb_sql_database" "db" {
+  name                = "v2v2b-db"
+  resource_group_name = azurerm_resource_group.rg.name
+  account_name        = azurerm_cosmosdb_account.db_account.name
+}
+
+# Cosmos DB Container (Example)
+resource "azurerm_cosmosdb_sql_container" "interactions" {
+  name                = "interactions"
+  resource_group_name = azurerm_resource_group.rg.name
+  account_name        = azurerm_cosmosdb_account.db_account.name
+  database_name       = azurerm_cosmosdb_sql_database.db.name
+  partition_key_path  = "/chat_id"
+}
+
+
