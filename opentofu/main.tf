@@ -1,4 +1,4 @@
-terrafrom {
+terraform {
   required_version = ">= 1.0"
 
   required_providers {
@@ -202,10 +202,4 @@ resource "azurerm_cosmosdb_sql_container" "interactions" {
   partition_key_path  = "/chat_id"
 }
 
-output "function_url" {
-  value = "https://${azurerm_linux_function_app.function_app.default_hostname}"
-}
 
-output "function_name" {
-  value = azurerm_linux_function_app.function_app.name
-}
