@@ -6,7 +6,7 @@ variable "azure_subscription_id" {
 variable "location" {
   description = "The Azure region for resource deployment"
   type        = string
-  default     = "eastus2"
+  default     = "eastus"
 }
 
 variable "environment" {
@@ -63,7 +63,7 @@ variable "storage_account_name" {
 variable "service_plan_sku" {
   description = "The SKU for the App Service Plan (e.g., B1, Y1 for consumption)"
   type        = string
-  default     = "Y1" # Consumption plan
+  default     = "F1" # Consumption plan
 }
 
 # Whitelist variable kept from GCP config
