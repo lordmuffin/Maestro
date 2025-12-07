@@ -6,7 +6,13 @@ variable "azure_subscription_id" {
 variable "location" {
   description = "The Azure region for resource deployment"
   type        = string
-  default     = "eastus"
+  default     = "eastus2"
+}
+
+variable "service_plan_sku" {
+  description = "The SKU for the App Service Plan (e.g., B1, Y1 for consumption)"
+  type        = string
+  default     = "Y1" # Consumption plan
 }
 
 variable "environment" {
