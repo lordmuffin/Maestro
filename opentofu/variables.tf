@@ -6,7 +6,7 @@ variable "azure_subscription_id" {
 variable "location" {
   description = "The Azure region for resource deployment"
   type        = string
-  default     = "eastus"
+  default     = "eastus2"
 }
 
 variable "environment" {

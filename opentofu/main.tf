@@ -36,8 +36,17 @@ resource "random_string" "unique_id" {
 locals {
   # Generate names if not provided
   rg_name     = var.resource_group_name != "" ? var.resource_group_name : "rg-${var.function_name}-${var.environment}"
-  sa_name     = var.storage_account_name != "" ? var.storage_account_name : "st${replace(var.function_name, "-", "")}${random_string.unique_id.result}"
-  cosmos_name = var.cosmos_db_name != "" ? var.cosmos_db_name : "cosmos-${var.function_name}-${var.environment}-${random_string.unique_id.result}"
+  
+  # Storage Account name must be max 24 chars, lowercase, alphanumeric.
+  # We take the function name (stripped of hyphens), truncate to 15 chars, and append 6 random chars. 21 chars max.
+  sa_name_base = substr(replace(var.function_name, "-", ""), 0, 15)
+  sa_name      = var.storage_account_name != "" ? var.storage_account_name : "st${local.sa_name_base}${random_string.unique_id.result}"
+
+  # Cosmos DB name must be max 44 chars.
+  # We construct a base name and ensure it fits.
+  # "cosmos-" (7) + func_name (truncated) + "-" + env + "-" + random (6)
+  # Limit base func name to ensure fit.
+  cosmos_name = var.cosmos_db_name != "" ? var.cosmos_db_name : "cosmos-${substr(var.function_name, 0, 20)}-${var.environment}-${random_string.unique_id.result}"
 
   # Function App name needs to be globally unique
   func_app_name = "${var.function_name}-${var.environment}-${random_string.unique_id.result}"
