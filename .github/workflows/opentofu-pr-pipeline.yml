@@ -1,4 +1,4 @@
-name: Terraform Plan & Pull Request Generation
+name: OpenTofu Plan & Pull Request Generation
 
 on:
   push:

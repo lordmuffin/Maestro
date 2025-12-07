@@ -6,6 +6,7 @@ A unified, privacy-first AI platform combining advanced conversational intellige
 
 **Phase 4: Platform & Ecosystem** - Unified EA Skills Framework with multi-LLM support
 **Infrastructure**: Enterprise-grade GitOps workflows with multi-environment deployment pipeline
+**Project Health**: [Balanced Scorecard Dashboard](BALANCED_SCORECARD.md) 📊
 
 ---
 

@@ -1,4 +1,4 @@
-name: 'Terraform Apply - Staging'
+name: 'OpenTofu Apply - Staging'
 
 on:
   push:

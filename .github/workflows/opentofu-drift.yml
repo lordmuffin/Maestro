@@ -1,4 +1,4 @@
-name: 'Terraform Drift Detection'
+name: 'OpenTofu Drift Detection'
 
 on:
   schedule:
@@ -245,7 +245,7 @@ jobs:
           # 🔍 Weekly Drift Detection Report
 
           **Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          **Workflow:** [Terraform Drift Detection](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          **Workflow:** [OpenTofu Drift Detection](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
           ## Environments Scanned
           - Staging
