@@ -154,12 +154,24 @@ if (-not $appObjectId) {
 
 # --- 3. Federated Credentials (OIDC) ---
 # We need to add federated credentials for each environment/scenario
-$scenarios = @(
-    @{ Name = "oidc-staging"; Subject = "repo:${RepoOwner}/${RepoName}:environment:staging" },
-    @{ Name = "oidc-production"; Subject = "repo:${RepoOwner}/${RepoName}:environment:production" },
-    @{ Name = "oidc-pull-request"; Subject = "repo:${RepoOwner}/${RepoName}:environment:terraform-plan" },
-    @{ Name = "oidc-main-branch"; Subject = "repo:${RepoOwner}/${RepoName}:ref:refs/heads/main" }
-)
+# GitHub OIDC subjects can be case-sensitive or inconsistent. We will register for both the provided RepoName and its lowercase version.
+$variants = @($RepoName)
+if ($RepoName -ne $RepoName.ToLower()) {
+    $variants += $RepoName.ToLower()
+}
+
+$scenarios = @()
+foreach ($vRepo in $variants) {
+    $suffix = ""
+    if ($vRepo -eq $RepoName.ToLower() -and $variants.Count -gt 1) {
+        $suffix = "-lower"
+    }
+    
+    $scenarios += @{ Name = "oidc-staging$suffix"; Subject = "repo:${RepoOwner}/${vRepo}:environment:staging" }
+    $scenarios += @{ Name = "oidc-production$suffix"; Subject = "repo:${RepoOwner}/${vRepo}:environment:production" }
+    $scenarios += @{ Name = "oidc-pull-request$suffix"; Subject = "repo:${RepoOwner}/${vRepo}:environment:terraform-plan" }
+    $scenarios += @{ Name = "oidc-main-branch$suffix"; Subject = "repo:${RepoOwner}/${vRepo}:ref:refs/heads/main" }
+}
 
 foreach ($s in $scenarios) {
     $fName = $s.Name
@@ -250,19 +262,27 @@ if ($SetGitHubSecrets) {
     if (Get-Command "gh" -ErrorAction SilentlyContinue) {
         Write-Header "Automatically Setting GitHub Secrets"
         
-        # Set Secrets
-        foreach ($k in $secrets.Keys) {
-            Write-Host "Setting secret $k..."
-            gh secret set $k --body "$($secrets[$k])"
+        $envs = @("staging", "production", "terraform-plan")
+        
+        foreach ($env in $envs) {
+            Write-Host "Configuring secrets for environment: $env" -ForegroundColor Yellow
+            
+            # Set Secrets for Environment
+            foreach ($k in $secrets.Keys) {
+                Write-Host "  Setting secret $k..."
+                # Use --env flag ensuring the environment is targeted.
+                # Note: gh secret set --env creates the env if it doesn't exist (usually), or we should assume it exists.
+                gh secret set $k --env $env --body "$($secrets[$k])"
+            }
+            
+            # Set Vars for Environment
+            foreach ($k in $vars.Keys) {
+                Write-Host "  Setting variable $k..."
+                gh variable set $k --env $env --body "$($vars[$k])"
+            }
         }
         
-        # Set Vars
-        foreach ($k in $vars.Keys) {
-            Write-Host "Setting variable $k..."
-            gh variable set $k --body "$($vars[$k])"
-        }
-        
-        Write-Success "GitHub secrets and variables updated."
+        Write-Success "GitHub secrets and variables updated for all environments."
     }
     else {
         Write-Warning "Switch -SetGitHubSecrets was passed, but 'gh' CLI is not found. Skipping auto-setup."
