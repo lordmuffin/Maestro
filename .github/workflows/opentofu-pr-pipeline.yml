@@ -36,7 +36,7 @@ jobs:
   plan_and_pr:
     name: 'Terraform Plan & PR Generation'
     runs-on: ubuntu-latest
-    environment: staging
+    environment: terraform-plan
 
     permissions:
       contents: write
@@ -68,10 +68,10 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           echo "🎨 Checking OpenTofu format..."
-          if ! tofu fmt -check -recursive; then
+          tofu fmt -check -recursive || {
             echo "::warning::OpenTofu formatting issues detected"
             exit 0
-          fi
+          }
         continue-on-error: true
 
       - name: OpenTofu Init
