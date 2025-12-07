@@ -7,7 +7,8 @@ on:
       - '!main'
       - '!master'
     paths:
-      - 'terraform/**'
+      - 'opentofu/**'
+      - 'V2V2B/**'
   workflow_dispatch:
     inputs:
       target_branch:
@@ -17,7 +18,7 @@ on:
         default: 'main'
 
 env:
-  TF_WORKING_DIR: terraform
+  TF_WORKING_DIR: opentofu
   OPENTOFU_VERSION: '1.10.0'
 
 permissions:
@@ -74,7 +75,7 @@ jobs:
           echo "🚀 Initializing OpenTofu..."
           tofu init \
             -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
-            -backend-config="prefix=terraform/state/plan" \
+            -backend-config="prefix=opentofu/state/plan" \
             -input=false
 
       - name: OpenTofu Validate
