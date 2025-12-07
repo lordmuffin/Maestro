@@ -68,10 +68,10 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           echo "🎨 Checking OpenTofu format..."
-          tofu fmt -check -recursive || {
+          if ! tofu fmt -check -recursive; then
             echo "::warning::OpenTofu formatting issues detected"
             exit 0
-          }
+          fi
         continue-on-error: true
 
       - name: OpenTofu Init
