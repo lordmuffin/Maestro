@@ -36,7 +36,7 @@ jobs:
   plan_and_pr:
     name: 'Terraform Plan & PR Generation'
     runs-on: ubuntu-latest
-    environment: terraform-plan
+    environment: staging
 
     permissions:
       contents: write
