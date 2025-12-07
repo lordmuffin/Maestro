@@ -66,11 +66,7 @@ variable "storage_account_name" {
 }
 
 # App Service Plan
-variable "service_plan_sku" {
-  description = "The SKU for the App Service Plan (e.g., B1, Y1 for consumption)"
-  type        = string
-  default     = "F1" # Consumption plan
-}
+
 
 # Whitelist variable kept from GCP config
 variable "logs_whitelist" {
