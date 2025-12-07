@@ -75,22 +75,22 @@ variable "logs_whitelist" {
 
 # Drive folder IDs kept consistent (application vars)
 variable "google_drive_folder_id" {
-    type = string
-    default = ""
+  type    = string
+  default = ""
 }
 variable "obsidian_drive_folder_id" {
-    type = string
-    default = ""
+  type    = string
+  default = ""
 }
 variable "kanban_folder_id" {
-    type = string
-    default = ""
+  type    = string
+  default = ""
 }
 variable "drive_poll_interval" {
-    type = number
-    default = 300
+  type    = number
+  default = 300
 }
 variable "beyond_repo_name" {
-    type = string
-    default = "lordmuffin/beyond"
+  type    = string
+  default = "lordmuffin/beyond"
 }

@@ -1,4 +1,4 @@
-terraform {
+terrafrom {
   required_version = ">= 1.0"
 
   required_providers {
@@ -35,10 +35,10 @@ resource "random_string" "unique_id" {
 
 locals {
   # Generate names if not provided
-  rg_name      = var.resource_group_name != "" ? var.resource_group_name : "rg-${var.function_name}-${var.environment}"
-  sa_name      = var.storage_account_name != "" ? var.storage_account_name : "st${replace(var.function_name, "-", "")}${random_string.unique_id.result}"
-  cosmos_name  = var.cosmos_db_name != "" ? var.cosmos_db_name : "cosmos-${var.function_name}-${var.environment}-${random_string.unique_id.result}"
-  
+  rg_name     = var.resource_group_name != "" ? var.resource_group_name : "rg-${var.function_name}-${var.environment}"
+  sa_name     = var.storage_account_name != "" ? var.storage_account_name : "st${replace(var.function_name, "-", "")}${random_string.unique_id.result}"
+  cosmos_name = var.cosmos_db_name != "" ? var.cosmos_db_name : "cosmos-${var.function_name}-${var.environment}-${random_string.unique_id.result}"
+
   # Function App name needs to be globally unique
   func_app_name = "${var.function_name}-${var.environment}-${random_string.unique_id.result}"
 }
@@ -96,7 +96,7 @@ data "archive_file" "function_source" {
     content  = file("${path.module}/../V2V2B/${var.repos_config_file}")
     filename = "repos.json"
   }
-  
+
   # Include Prompts
   source {
     content  = file("${path.module}/../prompts/telegram_chat_prompt.md")
@@ -152,18 +152,18 @@ resource "azurerm_linux_function_app" "function_app" {
       "DRIVE_POLL_INTERVAL"      = tostring(var.drive_poll_interval)
       "BEYOND_REPO_NAME"         = var.beyond_repo_name
       "LOGS_WHITELIST"           = var.logs_whitelist
-      
+
       # Cosmos DB Connection
-      "COSMOS_DB_ENDPOINT"       = azurerm_cosmosdb_account.db_account.endpoint
-      "COSMOS_DB_KEY"            = azurerm_cosmosdb_account.db_account.primary_key
-      "COSMOS_DB_DATABASE"       = "v2v2b-db"
+      "COSMOS_DB_ENDPOINT" = azurerm_cosmosdb_account.db_account.endpoint
+      "COSMOS_DB_KEY"      = azurerm_cosmosdb_account.db_account.primary_key
+      "COSMOS_DB_DATABASE" = "v2v2b-db"
     },
     {
       for label, token in var.github_tokens :
       "GITHUB_TOKEN_${upper(label)}" => token
     }
   )
-  
+
   # For zip deployment
   zip_deploy_file = data.archive_file.function_source.output_path
 }
