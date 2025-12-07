@@ -17,6 +17,11 @@ env:
   OPENTOFU_VERSION: '1.10.0'
   WORKING_DIR: './opentofu'
   ENVIRONMENT: 'staging'
+  # Azure Environment Variables
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_USE_OIDC: true
 
 jobs:
   apply-staging:
@@ -34,18 +39,21 @@ jobs:
           tofu_version: ${{ env.OPENTOFU_VERSION }}
           tofu_wrapper: false
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - name: Azure Login
+        uses: azure/login@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: OpenTofu Init
         working-directory: ${{ env.WORKING_DIR }}
         run: |
           tofu init \
-            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
-            -backend-config="prefix=opentofu/state/${{ env.ENVIRONMENT }}"
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP_NAME }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT_NAME }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=${{ env.ENVIRONMENT }}.terraform.tfstate"
 
       - name: Select Staging Workspace
         working-directory: ${{ env.WORKING_DIR }}
@@ -53,87 +61,18 @@ jobs:
           tofu workspace select ${{ env.ENVIRONMENT }} || \
           tofu workspace new ${{ env.ENVIRONMENT }}
 
-      - name: Backup Current State
-        id: backup
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          BACKUP_FILE="state-backup-$(date +%Y%m%d-%H%M%S).json"
-          tofu state pull > "$BACKUP_FILE"
-          echo "backup_file=$BACKUP_FILE" >> $GITHUB_OUTPUT
-          echo "State backed up successfully to: $BACKUP_FILE"
-
-      - name: Import Existing Resources
-        working-directory: ${{ env.WORKING_DIR }}
-        env:
-          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TF_VAR_github_tokens: '{"maestro":"${{ secrets.GH_TOKEN_MAESTRO }}","beyond":"${{ secrets.GH_TOKEN_BEYOND }}"}'
-          TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
-          TF_VAR_obsidian_drive_folder_id: ${{ vars.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
-          TF_VAR_kanban_folder_id: ${{ vars.KANBAN_FOLDER_ID || '' }}
-          TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
-          TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
-          TF_VAR_repos_config_file: 'repos.json'
-        run: |
-          echo "🔄 Attempting to import existing resources..."
-
-          # Import Firestore database (ignore errors if doesn't exist or already in state)
-          tofu import \
-            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
-            google_firestore_database.database \
-            "projects/${{ secrets.GCP_PROJECT_ID }}/databases/(default)" \
-            2>&1 | grep -v "Enter a value" || echo "⚠️ Firestore database not imported (may already be in state or not exist)"
-
-          # Import storage bucket (ignore errors if doesn't exist or already in state)
-          tofu import \
-            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
-            google_storage_bucket.function_bucket \
-            "${{ secrets.GCP_PROJECT_ID }}-v2v2b-function-source" \
-            2>&1 | grep -v "Enter a value" || echo "⚠️ Storage bucket not imported (may already be in state or not exist)"
-
-          # Import service account (ignore errors if doesn't exist or already in state)
-          tofu import \
-            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
-            google_service_account.function_sa \
-            "projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/v2v2b-interrogator-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            2>&1 | grep -v "Enter a value" || echo "⚠️ Service account not imported (may already be in state or not exist)"
-
-          # Import Firestore rules release (ignore errors if doesn't exist or already in state)
-          tofu import \
-            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
-            'google_firebaserules_release.firestore[0]' \
-            "projects/${{ secrets.GCP_PROJECT_ID }}/releases/cloud.firestore" \
-            2>&1 | grep -v "Enter a value" || echo "⚠️ Firestore rules release not imported (may already be in state or not exist)"
-
-          # Import Cloud Function (ignore errors if doesn't exist or already in state)
-          tofu import \
-            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
-            google_cloudfunctions2_function.v2v2b_interrogator \
-            "projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/functions/v2v2b-interrogator" \
-            2>&1 | grep -v "Enter a value" || echo "⚠️ Cloud Function not imported (may already be in state or not exist)"
-
-          # Import Cloud Run IAM member (ignore errors if doesn't exist or already in state)
-          tofu import \
-            -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
-            google_cloud_run_service_iam_member.public_access \
-            "v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/services/v2v2b-interrogator roles/run.invoker allUsers" \
-            2>&1 | grep -v "Enter a value" || echo "⚠️ Cloud Run IAM member not imported (may already be in state or not exist)"
-
-          echo "✅ Import step complete"
-        continue-on-error: true
-
       - name: OpenTofu Plan
         working-directory: ${{ env.WORKING_DIR }}
         env:
-          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TF_VAR_github_tokens: '{"maestro":"${{ secrets.GH_TOKEN_MAESTRO }}","beyond":"${{ secrets.GH_TOKEN_BEYOND }}"}'
           TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
           TF_VAR_obsidian_drive_folder_id: ${{ vars.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
           TF_VAR_kanban_folder_id: ${{ vars.KANBAN_FOLDER_ID || '' }}
           TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
-          TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
           TF_VAR_repos_config_file: 'repos.json'
+          TF_VAR_environment: ${{ env.ENVIRONMENT }}
         run: |
           tofu plan \
             -var-file="environments/${{ env.ENVIRONMENT }}.tfvars" \
@@ -144,17 +83,17 @@ jobs:
         id: apply
         working-directory: ${{ env.WORKING_DIR }}
         env:
-          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TF_VAR_github_tokens: '{"maestro":"${{ secrets.GH_TOKEN_MAESTRO }}","beyond":"${{ secrets.GH_TOKEN_BEYOND }}"}'
           TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
           TF_VAR_obsidian_drive_folder_id: ${{ vars.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
           TF_VAR_kanban_folder_id: ${{ vars.KANBAN_FOLDER_ID || '' }}
           TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
-          TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
           TF_VAR_repos_config_file: 'repos.json'
+          TF_VAR_environment: ${{ env.ENVIRONMENT }}
         run: tofu apply -auto-approve tfplan
-        continue-on-error: true
+        continue-on-error: false # Fail immediately if apply fails, no rollback logic for now as state is managed by Azure
 
       - name: Get OpenTofu Outputs
         if: steps.apply.outcome == 'success'
@@ -164,69 +103,36 @@ jobs:
           echo "function_url=$(tofu output -raw function_url 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
           echo "function_name=$(tofu output -raw function_name 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
 
-      - name: Rollback on Failure
-        if: steps.apply.outcome == 'failure'
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          echo "❌ Apply failed - initiating automatic rollback"
-
-          BACKUP_FILE="${{ steps.backup.outputs.backup_file }}"
-
-          if [ -f "$BACKUP_FILE" ]; then
-            echo "Restoring state from backup: $BACKUP_FILE"
-            tofu state push -force "$BACKUP_FILE"
-            echo "✅ Rollback complete - state restored to pre-deployment version"
-          else
-            echo "⚠️ No backup file found - cannot rollback automatically"
-            echo "Manual intervention may be required"
-          fi
-
-          exit 1
-
       - name: Create Deployment Summary
         if: always()
         run: |
           cat >> $GITHUB_STEP_SUMMARY <<EOF
           ## 🚀 Staging Deployment Summary
-
+          
           **Environment:** \`${{ env.ENVIRONMENT }}\`
           **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           **Commit:** \`${{ github.sha }}\`
           **Author:** @${{ github.actor }}
-
+          
           ### Status
           ${{ steps.apply.outcome == 'success' && '✅ **Deployment Successful**' || '❌ **Deployment Failed**' }}
-
-          ${{ steps.apply.outcome == 'success' && format('**Function URL:** `{0}`', steps.outputs.outputs.function_url) || '**Rollback:** Automatic rollback initiated' }}
-
-          ### Next Steps
-          ${{ steps.apply.outcome == 'success' && '- Test staging environment\n- Create PR to `main` for production deployment' || '- Check workflow logs\n- Fix issues and push new commit to `develop`' }}
+          
+          ${{ steps.apply.outcome == 'success' && format('**Function URL:** `{0}`', steps.outputs.outputs.function_url) || '**Error:** Check logs for details' }}
           EOF
 
       - name: Notify on Failure
-        if: steps.apply.outcome == 'failure'
+        if: failure()
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 587
           username: ${{ vars.NOTIFICATION_EMAIL }}
           password: ${{ secrets.EMAIL_APP_PASSWORD }}
-          subject: '❌ Maestro Staging Deployment Failed'
+          subject: '❌ Maestro Staging Deployment Failed (Azure)'
           to: ${{ vars.NOTIFICATION_EMAIL }}
           from: 'Maestro GitOps <${{ vars.NOTIFICATION_EMAIL }}>'
           body: |
-            Staging deployment failed for commit ${{ github.sha }}.
-
-            **Repository:** ${{ github.repository }}
-            **Branch:** ${{ github.ref_name }}
-            **Author:** ${{ github.actor }}
-            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            Automatic rollback was initiated.
-
-            Please review the workflow logs for details.
+            Staging deployment to Azure failed.
+            Commit: ${{ github.sha }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         continue-on-error: true
-
-      - name: Fail Workflow on Apply Failure
-        if: steps.apply.outcome == 'failure'
-        run: exit 1

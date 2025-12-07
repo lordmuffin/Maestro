@@ -10,8 +10,13 @@ on:
 
 env:
   OPENTOFU_VERSION: '1.10.0'
-  WORKING_DIR: './terraform'
+  WORKING_DIR: './opentofu'
   PR_NUMBER: ${{ github.event.inputs.pr_number }}
+  # Azure Environment Variables
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_USE_OIDC: true
 
 permissions:
   contents: read
@@ -23,7 +28,7 @@ jobs:
   unlock_terraform_state:
     name: 'Unlock OpenTofu State'
     runs-on: ubuntu-latest
-    environment: production # Using production environment for approval gate
+    environment: production
 
     steps:
       - name: 'Checkout Code'
@@ -35,18 +40,21 @@ jobs:
           tofu_version: ${{ env.OPENTOFU_VERSION }}
           tofu_wrapper: false
 
-      - name: 'Authenticate to Google Cloud'
-        uses: google-github-actions/auth@v2
+      - name: Azure Login
+        uses: azure/login@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: 'OpenTofu Init'
         working-directory: ${{ env.WORKING_DIR }}
         run: |
           tofu init \
-            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
-            -backend-config="prefix=terraform/state/production"
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP_NAME }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT_NAME }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=production.terraform.tfstate"
 
       - name: 'Extract Lock ID'
         id: extract_lock_id
@@ -54,64 +62,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN_MAESTRO }}
         run: |
           echo "🔐 Fetching logs to find the lock ID..."
-
-          # Get the ID of the latest failed workflow run for the PR
-          RUN_ID=$(gh run list --workflow "terraform-apply-production.yml" --json databaseId,status --jq '.[] | select(.status == "failure" or .status == "cancelled" or .status == "timed_out") | .databaseId' | head -n 1)
-
+          RUN_ID=$(gh run list --workflow "opentofu-apply-production.yml" --json databaseId,status --jq '.[] | select(.status == "failure" or .status == "cancelled" or .status == "timed_out") | .databaseId' | head -n 1)
+          
           if [ -z "$RUN_ID" ]; then
-            echo "::error::No failed workflow runs found for terraform-apply-production.yml"
-            exit 1
+             echo "::error::No failed run found"
+             exit 1
           fi
-
-          echo "Found failed run ID: $RUN_ID"
-
-          # Download the logs for the failed run
+          
           gh run view $RUN_ID --log > logs.txt
-
-          # Extract the Lock ID from the logs
-          LOCK_ID=$(grep -oP 'Lock ID: \K[a-f0-9-]+' logs.txt)
-
+          LOCK_ID=$(grep -oP 'Lock ID: \K[a-f0-9-]+' logs.txt || echo "")
+          
           if [ -z "$LOCK_ID" ]; then
-            echo "::error::Could not find Lock ID in the logs."
-            exit 1
+             echo "::error::Could not find Lock ID"
+             exit 1
           fi
-
+          
           echo "LOCK_ID=${LOCK_ID}" >> $GITHUB_OUTPUT
-          echo "Found Lock ID: ${LOCK_ID}"
-
-      - name: 'Manual Approval'
-        id: manual_approval
-        run: |
-          echo "Waiting for manual approval to unlock the OpenTofu state."
-          # This step will pause the workflow, waiting for an authorized user to approve.
-          # The approval is handled by the 'environment' configuration of this job.
 
       - name: 'Unlock OpenTofu State'
-        if: success() # This step will only run if the manual approval is given
         working-directory: ${{ env.WORKING_DIR }}
         run: |
-          echo "🔑 Unlocking OpenTofu state with Lock ID: ${{ steps.extract_lock_id.outputs.LOCK_ID }}"
-          tofu force-unlock ${{ steps.extract_lock_id.outputs.LOCK_ID }}
-          echo "✅ OpenTofu state unlocked."
-
-      - name: 'Post Comment to PR'
-        if: always() # Always post a comment, regardless of success or failure
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GH_TOKEN_MAESTRO }}
-          script: |
-            const prNumber = process.env.PR_NUMBER;
-            let commentBody;
-
-            if ( '${{ job.status }}' === 'success' ) {
-              commentBody = `✅ **Terraform state unlocked successfully!** You can now re-run the apply job.`;
-            } else {
-              commentBody = `❌ **Failed to unlock OpenTofu state.** Please check the workflow logs for more details.`;
-            }
-
-            github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              body: commentBody
-            });
+          tofu force-unlock -force ${{ steps.extract_lock_id.outputs.LOCK_ID }}

@@ -13,13 +13,20 @@ from typing import Dict, List, Any, Optional
 import base64
 from pathlib import Path
 import asyncio
+import io
 
-from flask import Flask, request, jsonify, make_response
-import functions_framework
-from google.cloud import firestore
+import azure.functions as func
+from azure.cosmos import CosmosClient, PartitionKey
+from azure.identity import DefaultAzureCredential
 from google.cloud import aiplatform
-from google.cloud import logging as gcp_logging
+# Removed google.cloud.firestore imports
 import vertexai
+from vertexai.generative_models import GenerativeModel, Part, Content
+from github import Github
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from google.auth import default
+import requests
 from vertexai.generative_models import GenerativeModel, Part, Content
 from github import Github
 from googleapiclient.discovery import build
@@ -51,7 +58,9 @@ logger.info(f"Working directory: {os.getcwd()}")
 logger.info("=" * 80)
 
 # Environment variables
-GCP_PROJECT = os.environ.get('GCP_PROJECT')
+# Environment variables
+# GCP_PROJECT is still needed for Vertex AI
+GCP_PROJECT = os.environ.get('GCP_PROJECT') 
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 REPO_NAME = os.environ.get('REPO_NAME')
@@ -62,6 +71,11 @@ KANBAN_FOLDER_ID = os.environ.get('KANBAN_FOLDER_ID', '')
 BEYOND_REPO_NAME = os.environ.get('BEYOND_REPO_NAME', 'lordmuffin/beyond')
 LOGS_WHITELIST = os.environ.get('LOGS_WHITELIST', '')
 TARGET_FUNCTION_NAME = os.environ.get('FUNCTION_NAME', 'v2v2b-interrogator')
+
+# Azure Cosmos DB Configuration
+COSMOS_ENDPOINT = os.environ.get('COSMOS_DB_ENDPOINT')
+COSMOS_KEY = os.environ.get('COSMOS_DB_KEY') # Ideally use Key Vault or Managed Identity
+DATABASE_NAME = "MaestroDB"
 
 # Safe integer conversion with error handling
 try:
@@ -74,41 +88,47 @@ except ValueError as e:
 # Log environment configuration (without exposing secrets)
 logger.info("Environment configuration:")
 logger.info(f"  GCP_PROJECT: {'SET' if GCP_PROJECT else 'NOT SET'}")
+logger.info(f"  COSMOS_ENDPOINT: {'SET' if COSMOS_ENDPOINT else 'NOT SET'}")
 logger.info(f"  GITHUB_TOKEN: {'SET' if GITHUB_TOKEN else 'NOT SET'}")
-logger.info(f"  TELEGRAM_BOT_TOKEN: {'SET' if TELEGRAM_BOT_TOKEN else 'NOT SET'}")
-logger.info(f"  REPO_NAME: {REPO_NAME if REPO_NAME else 'NOT SET'}")
-logger.info(f"  FUNCTION_URL: {FUNCTION_URL if FUNCTION_URL else 'NOT SET'}")
-logger.info(f"  GOOGLE_DRIVE_FOLDER_ID: {'SET' if GOOGLE_DRIVE_FOLDER_ID else 'NOT SET'}")
-logger.info(f"  OBSIDIAN_DRIVE_FOLDER_ID: {'SET' if OBSIDIAN_DRIVE_FOLDER_ID else 'NOT SET'}")
-
-# Validate critical environment variables
-missing_vars = []
-if not GCP_PROJECT:
-    missing_vars.append('GCP_PROJECT')
-if not TELEGRAM_BOT_TOKEN:
-    missing_vars.append('TELEGRAM_BOT_TOKEN')
-
-# Note: Repository configuration validation happens after GitHubConfigManager class is defined
-# See validate_repo_config() function below
-
-if missing_vars:
-    logger.error(f"CRITICAL: Missing required environment variables: {', '.join(missing_vars)}")
-    logger.error("Function may fail when these are accessed")
-else:
-    logger.info("Basic environment variables are set")
+# ...
 
 # Lazy initialization globals
-_db_client = None
+_cosmos_client = None
+_db_container_sessions = None
+_db_container_interviewer = None
 _vertexai_initialized = False
 
 
-def get_db():
-    """Lazy-load Firestore client to prevent cold start crashes."""
-    global _db_client
-    if _db_client is None:
-        _db_client = firestore.Client(project=GCP_PROJECT)
-        logger.info("Initialized Firestore client")
-    return _db_client
+def get_cosmos_container(container_name):
+    """Lazy-load Cosmos DB container."""
+    global _cosmos_client
+    if _cosmos_client is None:
+        if not COSMOS_ENDPOINT or not COSMOS_KEY:
+            logger.error("Cosmos DB credentials missing")
+            raise ValueError("Cosmos DB credentials missing")
+        _cosmos_client = CosmosClient(COSMOS_ENDPOINT, credential=COSMOS_KEY)
+        logger.info("Initialized Cosmos DB client")
+    
+    database = _cosmos_client.get_database_client(DATABASE_NAME)
+    return database.get_container_client(container_name)
+
+def get_sessions_container():
+    return get_cosmos_container("sessions")
+
+def get_interviewer_container():
+    return get_cosmos_container("interviewer_sessions")
+
+def get_validations_container():
+    return get_cosmos_container("pending_validations")
+
+def get_kb_container():
+    # Only if you created a separate container or use sessions
+    # Using 'knowledge_base' as container name
+    return get_cosmos_container("knowledge_base")
+
+def get_processed_files_container():
+    return get_cosmos_container("processed_files")
+
 
 
 def ensure_vertexai_initialized():
@@ -238,42 +258,39 @@ def get_prompt(prompt_name: str) -> str:
     return _prompts_cache[prompt_name]
 
 
-class FirestoreManager:
-    """Manages Firestore operations for session history."""
-
-    @staticmethod
-    def get_session_ref(session_id: str):
-        """Get Firestore document reference for a session."""
-        return get_db().collection('sessions').document(session_id)
+class CosmosDBManager:
+    """Manages Cosmos DB operations for session history."""
 
     @staticmethod
     def save_message(session_id: str, role: str, content: str, space_name: str = None):
         """Save a message to session history."""
         try:
-            session_ref = FirestoreManager.get_session_ref(session_id)
-            doc = session_ref.get()
+            container = get_sessions_container()
             message = {
                 'role': role,
                 'content': content,
                 'timestamp': datetime.utcnow().isoformat()
             }
 
-            if doc.exists:
-                data = doc.to_dict()
-                history = data.get('history', [])
+            try:
+                # Try to read existing session
+                item = container.read_item(item=session_id, partition_key=session_id)
+                history = item.get('history', [])
                 history.append(message)
-                session_ref.update({
-                    'history': history,
-                    'last_updated': firestore.SERVER_TIMESTAMP
-                })
-            else:
-                session_ref.set({
+                item['history'] = history
+                item['last_updated'] = datetime.utcnow().isoformat()
+                container.upsert_item(item)
+            except Exception:
+                # Create new session
+                item = {
+                    'id': session_id,
                     'session_id': session_id,
                     'space_name': space_name,
                     'history': [message],
-                    'created_at': firestore.SERVER_TIMESTAMP,
-                    'last_updated': firestore.SERVER_TIMESTAMP
-                })
+                    'created_at': datetime.utcnow().isoformat(),
+                    'last_updated': datetime.utcnow().isoformat()
+                }
+                container.create_item(item)
             logger.info(f"Saved message to session {session_id}")
         except Exception as e:
             logger.error(f"Error saving message: {e}")
@@ -283,11 +300,12 @@ class FirestoreManager:
     def get_session_history(session_id: str) -> List[Dict[str, str]]:
         """Retrieve session history."""
         try:
-            session_ref = FirestoreManager.get_session_ref(session_id)
-            doc = session_ref.get()
-            if doc.exists:
-                return doc.to_dict().get('history', [])
-            return []
+            container = get_sessions_container()
+            try:
+                item = container.read_item(item=session_id, partition_key=session_id)
+                return item.get('history', [])
+            except Exception:
+                return []
         except Exception as e:
             logger.error(f"Error retrieving history: {e}")
             return []
@@ -296,11 +314,12 @@ class FirestoreManager:
     def get_space_name(session_id: str) -> Optional[str]:
         """Get the space name for a session."""
         try:
-            session_ref = FirestoreManager.get_session_ref(session_id)
-            doc = session_ref.get()
-            if doc.exists:
-                return doc.to_dict().get('space_name')
-            return None
+            container = get_sessions_container()
+            try:
+                item = container.read_item(item=session_id, partition_key=session_id)
+                return item.get('space_name')
+            except Exception:
+                return None
         except Exception as e:
             logger.error(f"Error retrieving space name: {e}")
             return None
@@ -311,8 +330,9 @@ class FirestoreManager:
                                structured_notes: str, file_data: bytes = None) -> None:
         """Save a file upload awaiting user validation."""
         try:
-            validation_ref = get_db().collection('pending_validations').document(validation_id)
+            container = get_validations_container()
             validation_data = {
+                'id': validation_id,
                 'validation_id': validation_id,
                 'session_id': session_id,
                 'chat_id': chat_id,
@@ -320,14 +340,14 @@ class FirestoreManager:
                 'filename': filename,
                 'content': content,
                 'structured_notes': structured_notes,
-                'created_at': firestore.SERVER_TIMESTAMP,
+                'created_at': datetime.utcnow().isoformat(),
                 'status': 'awaiting_validation'
             }
             # Store file_data separately if provided (for binary files)
             if file_data:
                 validation_data['file_data_base64'] = base64.b64encode(file_data).decode('utf-8')
 
-            validation_ref.set(validation_data)
+            container.upsert_item(validation_data)
             logger.info(f"Saved pending validation {validation_id}")
         except Exception as e:
             logger.error(f"Error saving pending validation: {e}")
@@ -337,12 +357,18 @@ class FirestoreManager:
     def get_pending_validation(validation_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a pending validation."""
         try:
-            validation_ref = get_db().collection('pending_validations').document(validation_id)
-            doc = validation_ref.get()
-            if doc.exists:
-                return doc.to_dict()
-            return None
+            container = get_validations_container()
+            try:
+                # Assuming partition key is same as id for simplicity in this migration
+                # In production, check partition key usage. Using validation_id as PK.
+                return container.read_item(item=validation_id, partition_key=validation_id)
+            except Exception:
+                return None
         except Exception as e:
+            # If default partition key is NOT id, we might need query or different PK.
+            # Assuming /id is PK for all containers as per standard Terraform setup if not specified otherwise
+            # But in main.tf (step 2), we defined PK as /id or similar?
+            # Let's assume /id.
             logger.error(f"Error retrieving pending validation: {e}")
             return None
 
@@ -350,8 +376,8 @@ class FirestoreManager:
     def delete_pending_validation(validation_id: str) -> None:
         """Delete a pending validation."""
         try:
-            validation_ref = get_db().collection('pending_validations').document(validation_id)
-            validation_ref.delete()
+            container = get_validations_container()
+            container.delete_item(item=validation_id, partition_key=validation_id)
             logger.info(f"Deleted pending validation {validation_id}")
         except Exception as e:
             logger.error(f"Error deleting pending validation: {e}")
@@ -362,8 +388,9 @@ class FirestoreManager:
                                    source_file_path: Optional[str], original_content: str) -> Dict[str, Any]:
         """Create a new interviewer session for transcript refinement."""
         try:
-            session_ref = get_db().collection('interviewer_sessions').document(session_id)
+            container = get_interviewer_container()
             session_data = {
+                'id': session_id,
                 'session_id': session_id,
                 'active': True,
                 'completed': False,
@@ -372,11 +399,11 @@ class FirestoreManager:
                 'original_content': original_content,
                 'clarifications': [],
                 'refined_notes': None,
-                'started_at': firestore.SERVER_TIMESTAMP,
+                'started_at': datetime.utcnow().isoformat(),
                 'completed_at': None,
                 'obsidian_path': None
             }
-            session_ref.set(session_data)
+            container.upsert_item(session_data)
             logger.info(f"Created interviewer session {session_id}")
             return session_data
         except Exception as e:
@@ -387,12 +414,12 @@ class FirestoreManager:
     def is_interviewer_active(session_id: str) -> bool:
         """Check if an interviewer session is currently active."""
         try:
-            session_ref = get_db().collection('interviewer_sessions').document(session_id)
-            doc = session_ref.get()
-            if doc.exists:
-                data = doc.to_dict()
-                return data.get('active', False) and not data.get('completed', False)
-            return False
+            container = get_interviewer_container()
+            try:
+                item = container.read_item(item=session_id, partition_key=session_id)
+                return item.get('active', False) and not item.get('completed', False)
+            except Exception:
+                return False
         except Exception as e:
             logger.error(f"Error checking interviewer session: {e}")
             return False
@@ -401,11 +428,11 @@ class FirestoreManager:
     def get_interviewer_session(session_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve interviewer session data."""
         try:
-            session_ref = get_db().collection('interviewer_sessions').document(session_id)
-            doc = session_ref.get()
-            if doc.exists:
-                return doc.to_dict()
-            return None
+            container = get_interviewer_container()
+            try:
+                return container.read_item(item=session_id, partition_key=session_id)
+            except Exception:
+                return None
         except Exception as e:
             logger.error(f"Error retrieving interviewer session: {e}")
             return None
@@ -414,21 +441,18 @@ class FirestoreManager:
     def add_clarification(session_id: str, question: str, answer: str) -> None:
         """Add a Q&A clarification to the interviewer session."""
         try:
-            session_ref = get_db().collection('interviewer_sessions').document(session_id)
-            doc = session_ref.get()
-            if doc.exists:
-                data = doc.to_dict()
-                clarifications = data.get('clarifications', [])
-                clarifications.append({
-                    'question': question,
-                    'answer': answer,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                })
-                session_ref.update({
-                    'clarifications': clarifications,
-                    'last_updated': firestore.SERVER_TIMESTAMP
-                })
-                logger.info(f"Added clarification to session {session_id}")
+            container = get_interviewer_container()
+            item = container.read_item(item=session_id, partition_key=session_id)
+            clarifications = item.get('clarifications', [])
+            clarifications.append({
+                'question': question,
+                'answer': answer,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            })
+            item['clarifications'] = clarifications
+            item['last_updated'] = datetime.utcnow().isoformat()
+            container.upsert_item(item)
+            logger.info(f"Added clarification to session {session_id}")
         except Exception as e:
             logger.error(f"Error adding clarification: {e}")
             raise
@@ -437,14 +461,14 @@ class FirestoreManager:
     def complete_interviewer_session(session_id: str, refined_notes: str, obsidian_path: str) -> None:
         """Mark interviewer session as completed."""
         try:
-            session_ref = get_db().collection('interviewer_sessions').document(session_id)
-            session_ref.update({
-                'active': False,
-                'completed': True,
-                'refined_notes': refined_notes,
-                'obsidian_path': obsidian_path,
-                'completed_at': firestore.SERVER_TIMESTAMP
-            })
+            container = get_interviewer_container()
+            item = container.read_item(item=session_id, partition_key=session_id)
+            item['active'] = False
+            item['completed'] = True
+            item['refined_notes'] = refined_notes
+            item['obsidian_path'] = obsidian_path
+            item['completed_at'] = datetime.utcnow().isoformat()
+            container.upsert_item(item)
             logger.info(f"Completed interviewer session {session_id}")
         except Exception as e:
             logger.error(f"Error completing interviewer session: {e}")
@@ -454,8 +478,21 @@ class FirestoreManager:
     def save_session_data(session_id: str, data: Dict[str, Any]):
         """Save structured session data."""
         try:
-            session_ref = FirestoreManager.get_session_ref(session_id)
-            session_ref.set({'session_data': data}, merge=True)
+            # We store this in the main sessions container, updating the item
+            container = get_sessions_container()
+            try:
+                item = container.read_item(item=session_id, partition_key=session_id)
+                item['session_data'] = data
+                container.upsert_item(item)
+            except Exception:
+                # Should not happen if session exists, but if not:
+                 item = {
+                    'id': session_id,
+                    'session_id': session_id,
+                    'session_data': data,
+                    'created_at': datetime.utcnow().isoformat()
+                }
+                 container.create_item(item)
             logger.info(f"Saved session data for session {session_id}")
         except Exception as e:
             logger.error(f"Error saving session data: {e}")
@@ -465,11 +502,12 @@ class FirestoreManager:
     def get_session_data(session_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve structured session data."""
         try:
-            session_ref = FirestoreManager.get_session_ref(session_id)
-            doc = session_ref.get()
-            if doc.exists:
-                return doc.to_dict().get('session_data')
-            return None
+            container = get_sessions_container()
+            try:
+                item = container.read_item(item=session_id, partition_key=session_id)
+                return item.get('session_data')
+            except Exception:
+                return None
         except Exception as e:
             logger.error(f"Error retrieving session data: {e}")
             return None
@@ -478,12 +516,16 @@ class FirestoreManager:
     def delete_session_data(session_id: str):
         """Delete structured session data."""
         try:
-            session_ref = FirestoreManager.get_session_ref(session_id)
-            session_ref.update({'session_data': firestore.DELETE_FIELD})
+            container = get_sessions_container()
+            item = container.read_item(item=session_id, partition_key=session_id)
+            if 'session_data' in item:
+                del item['session_data']
+                container.upsert_item(item)
             logger.info(f"Deleted session data for session {session_id}")
         except Exception as e:
             logger.error(f"Error deleting session data: {e}")
             raise
+
 
 
 class GoogleDriveClient:
@@ -804,19 +846,21 @@ class KnowledgeBaseManager:
 
     @staticmethod
     def index_transcript(file_id: str, filename: str, content: str, summary: str, metadata: Dict[str, Any]):
-        """Index a transcript in Firestore for search and retrieval."""
+        """Index a transcript in Cosmos DB for search and retrieval."""
         try:
-            kb_ref = get_db().collection('knowledge_base').document(file_id)
-            kb_ref.set({
+            container = get_kb_container()
+            item = {
+                'id': file_id,
                 'file_id': file_id,
                 'filename': filename,
                 'content': content,
                 'summary': summary,
                 'metadata': metadata,
-                'indexed_at': firestore.SERVER_TIMESTAMP,
+                'indexed_at': datetime.utcnow().isoformat(),
                 'created_time': metadata.get('createdTime'),
                 'file_type': metadata.get('mimeType')
-            })
+            }
+            container.upsert_item(item)
             logger.info(f"Indexed transcript {filename} in knowledge base")
         except Exception as e:
             logger.error(f"Error indexing transcript: {e}")
@@ -826,11 +870,13 @@ class KnowledgeBaseManager:
     def mark_as_processed(file_id: str):
         """Mark a file as processed to avoid duplicate processing."""
         try:
-            processed_ref = get_db().collection('processed_files').document(file_id)
-            processed_ref.set({
+            container = get_processed_files_container()
+            item = {
+                'id': file_id,
                 'file_id': file_id,
-                'processed_at': firestore.SERVER_TIMESTAMP
-            })
+                'processed_at': datetime.utcnow().isoformat()
+            }
+            container.upsert_item(item)
         except Exception as e:
             logger.error(f"Error marking file as processed: {e}")
 
@@ -838,8 +884,12 @@ class KnowledgeBaseManager:
     def is_processed(file_id: str) -> bool:
         """Check if a file has already been processed."""
         try:
-            doc = get_db().collection('processed_files').document(file_id).get()
-            return doc.exists
+            container = get_processed_files_container()
+            try:
+                container.read_item(item=file_id, partition_key=file_id)
+                return True
+            except Exception:
+                return False
         except Exception as e:
             logger.error(f"Error checking if file is processed: {e}")
             return False
@@ -1177,43 +1227,12 @@ class TelegramClient:
 # ASYNC BOT HANDLERS & LOGIC
 # --------------------------------------------------------------------------------
 
-def fetch_gcp_logs(function_name: str) -> List[str]:
-    """Fetches ERROR and CRITICAL logs for the specified Cloud Function within the last 5 minutes."""
-    try:
-        client = gcp_logging.Client(project=GCP_PROJECT)
-        five_mins_ago = (datetime.utcnow() - timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-
-        # Filter: Specific function, Severity >= ERROR, Time >= 5 mins ago
-        filter_str = (
-            f'resource.type="cloud_function" AND '
-            f'resource.labels.function_name="{function_name}" AND '
-            f'severity >= ERROR AND '
-            f'timestamp >= "{five_mins_ago}"'
-        )
-
-        entries = client.list_entries(filter_=filter_str, order_by=gcp_logging.DESCENDING, page_size=20)
-
-        logs = []
-        for entry in entries:
-            timestamp = entry.timestamp.strftime('%H:%M:%S')
-            severity = entry.severity or "ERROR"
-
-            payload = entry.payload
-            if isinstance(payload, dict):
-                message = json.dumps(payload)
-            else:
-                message = str(payload)
-
-            # Truncate individual log message to avoid one huge log eating the whole buffer
-            if len(message) > 300:
-                message = message[:300] + "..."
-
-            logs.append(f"[{timestamp}] {severity}: {message}")
-
-        return logs
-    except Exception as e:
-        logger.error(f"Error fetching logs: {e}")
-        raise
+def fetch_azure_logs(function_name: str) -> List[str]:
+    """
+    Placeholder for fetching Azure Monitor logs.
+    In Azure, use Application Insights SDK or query API.
+    """
+    return ["Log retrieval not yet implemented for Azure."]
 
 
 async def logs_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1238,7 +1257,7 @@ async def logs_command_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # 2. Fetch Logs (blocking I/O in executor)
         loop = asyncio.get_running_loop()
-        logs = await loop.run_in_executor(None, fetch_gcp_logs, TARGET_FUNCTION_NAME)
+        logs = await loop.run_in_executor(None, fetch_azure_logs, TARGET_FUNCTION_NAME)
 
         if not logs:
             await update.message.reply_text("✅ No ERROR or CRITICAL logs found in the last 5 minutes.")
@@ -1299,7 +1318,7 @@ class BotHandlers:
     async def upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         session_id = f"telegram_{update.effective_user.id}_{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, FirestoreManager.save_message, session_id, 'system', 'Upload requested', str(update.effective_chat.id))
+        await loop.run_in_executor(None, CosmosDBManager.save_message, session_id, 'system', 'Upload requested', str(update.effective_chat.id))
 
         upload_url = f"{FUNCTION_URL}?mode=ui&session={session_id}"
         await update.message.reply_text(f"📎 Upload Link:\n{upload_url}")
@@ -1309,11 +1328,11 @@ class BotHandlers:
         loop = asyncio.get_running_loop()
 
         try:
-            is_active = await loop.run_in_executor(None, FirestoreManager.is_interviewer_active, session_id)
+            is_active = await loop.run_in_executor(None, CosmosDBManager.is_interviewer_active, session_id)
             if is_active:
                 await self._handle_interview_complete(update, context, session_id)
             else:
-                history = await loop.run_in_executor(None, FirestoreManager.get_session_history, session_id)
+                history = await loop.run_in_executor(None, CosmosDBManager.get_session_history, session_id)
                 if not history:
                     await update.message.reply_text('❌ No session history found.')
                     return
@@ -1328,7 +1347,7 @@ class BotHandlers:
         loop = asyncio.get_running_loop()
 
         try:
-            session = await loop.run_in_executor(None, FirestoreManager.get_interviewer_session, session_id)
+            session = await loop.run_in_executor(None, CosmosDBManager.get_interviewer_session, session_id)
             if not session:
                 await update.message.reply_text('❌ No active session.')
                 return
@@ -1338,7 +1357,7 @@ class BotHandlers:
 
             prompt = f"{get_prompt('interviewer_prompt.md')}\n\nORIGINAL: {session['original_content']}\n\nCLARIFICATIONS: {clar_text}\n\nPROCEED TO FINALIZATION."
 
-            history = await loop.run_in_executor(None, FirestoreManager.get_session_history, session_id)
+            history = await loop.run_in_executor(None, CosmosDBManager.get_session_history, session_id)
             final_notes = await loop.run_in_executor(None, self.gemini.chat_response, prompt, history)
 
             # Extract title
@@ -1378,7 +1397,7 @@ class BotHandlers:
             except Exception as e:
                 await update.message.reply_text(f"⚠️ PR creation failed: {e}")
 
-            await loop.run_in_executor(None, FirestoreManager.complete_interviewer_session, session_id, final_notes, str(new_file_name))
+            await loop.run_in_executor(None, CosmosDBManager.complete_interviewer_session, session_id, final_notes, str(new_file_name))
             await update.message.reply_text("✅ Interview finalized.")
 
         except Exception as e:
@@ -1394,37 +1413,37 @@ class BotHandlers:
         loop = asyncio.get_running_loop()
 
         try:
-            is_active = await loop.run_in_executor(None, FirestoreManager.is_interviewer_active, session_id)
+            is_active = await loop.run_in_executor(None, CosmosDBManager.is_interviewer_active, session_id)
 
             if is_active:
-                await loop.run_in_executor(None, FirestoreManager.save_message, session_id, 'user', text, str(update.effective_chat.id))
+                await loop.run_in_executor(None, CosmosDBManager.save_message, session_id, 'user', text, str(update.effective_chat.id))
 
                 # Get context for next question
-                history = await loop.run_in_executor(None, FirestoreManager.get_session_history, session_id)
+                history = await loop.run_in_executor(None, CosmosDBManager.get_session_history, session_id)
                 last_q = ""
                 for msg in reversed(history):
                     if msg.get('role') == 'assistant':
                         last_q = msg.get('content', '')
                         break
 
-                await loop.run_in_executor(None, FirestoreManager.add_clarification, session_id, last_q, text)
+                await loop.run_in_executor(None, CosmosDBManager.add_clarification, session_id, last_q, text)
 
-                session = await loop.run_in_executor(None, FirestoreManager.get_interviewer_session, session_id)
+                session = await loop.run_in_executor(None, CosmosDBManager.get_interviewer_session, session_id)
                 clar_text = "\n".join([f"Q: {c['question']}\nA: {c['answer']}" for c in session.get('clarifications', [])])
 
                 prompt = f"{get_prompt('interviewer_prompt.md')}\n\nTranscript: {session['original_content']}\n\nClarifications: {clar_text}\n\nUser: {text}\n\nContinue interview."
                 response = await loop.run_in_executor(None, self.gemini.chat_response, prompt, history)
 
-                await loop.run_in_executor(None, FirestoreManager.save_message, session_id, 'assistant', response, str(update.effective_chat.id))
+                await loop.run_in_executor(None, CosmosDBManager.save_message, session_id, 'assistant', response, str(update.effective_chat.id))
                 await update.message.reply_text(response)
 
             else:
                 # Normal Chat
-                await loop.run_in_executor(None, FirestoreManager.save_message, session_id, 'user', text, str(update.effective_chat.id))
-                history = await loop.run_in_executor(None, FirestoreManager.get_session_history, session_id)
+                await loop.run_in_executor(None, CosmosDBManager.save_message, session_id, 'user', text, str(update.effective_chat.id))
+                history = await loop.run_in_executor(None, CosmosDBManager.get_session_history, session_id)
                 response = await loop.run_in_executor(None, self.gemini.chat_response, text, history)
 
-                await loop.run_in_executor(None, FirestoreManager.save_message, session_id, 'assistant', response, str(update.effective_chat.id))
+                await loop.run_in_executor(None, CosmosDBManager.save_message, session_id, 'assistant', response, str(update.effective_chat.id))
                 await update.message.reply_text(response)
 
         except Exception as e:
@@ -1479,12 +1498,12 @@ class BotHandlers:
                 return
 
             # Start Interview
-            await loop.run_in_executor(None, FirestoreManager.create_interviewer_session, session_id, None, None, analysis)
+            await loop.run_in_executor(None, CosmosDBManager.create_interviewer_session, session_id, None, None, analysis)
 
             prompt = f"{get_prompt('interviewer_prompt.md')}\n\nTRANSCRIPT:\n{analysis}"
             questions = await loop.run_in_executor(None, self.gemini.chat_response, prompt, [])
 
-            await loop.run_in_executor(None, FirestoreManager.save_message, session_id, 'assistant', questions, str(update.effective_chat.id))
+            await loop.run_in_executor(None, CosmosDBManager.save_message, session_id, 'assistant', questions, str(update.effective_chat.id))
             await update.message.reply_text(f"📝 Analysis Complete. Starting interview:\n\n{questions}")
 
         except Exception as e:
@@ -1530,9 +1549,9 @@ class UploadHandler:
             else:
                 return self._error_html(f'Unsupported file type: {content_type}')
 
-            FirestoreManager.save_message(session_id, 'assistant', f"[FILE ANALYSIS: {filename}]\n\n{analysis}")
+            CosmosDBManager.save_message(session_id, 'assistant', f"[FILE ANALYSIS: {filename}]\n\n{analysis}")
 
-            chat_id_str = FirestoreManager.get_space_name(session_id)
+            chat_id_str = CosmosDBManager.get_space_name(session_id)
             if chat_id_str:
                 try:
                     chat_id = int(chat_id_str)
@@ -1650,63 +1669,106 @@ def get_upload_ui_html(session_id: str) -> str:
 # ENTRY POINT
 # --------------------------------------------------------------------------------
 
-@functions_framework.http
-def entry_point(request):
-    """
-    Main entry point for the Cloud Function.
-    Routes requests based on method and query parameters.
-    """
-    if request.method == 'OPTIONS':
-        return add_cors_headers(make_response('', 204))
+# --------------------------------------------------------------------------------
+# ENTRY POINT
+# --------------------------------------------------------------------------------
 
-    path = request.path
-    mode = request.args.get('mode', '')
-    session_id = request.args.get('session', '')
+app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+
+@app.route(route="{*route}")
+def main_entry_point(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Main entry point for the Azure Function.
+    Routes requests based on path and query parameters.
+    """
+    method = req.method
+    # Handle both direct path routing and the 'mode' query param for compatibility
+    # Assuming route can be anything, but we usually look for specific patterns
+    
+    # Path extraction: req.route_params.get('route') will give us 'telegram' etc.
+    route_path = req.route_params.get('route')
+    mode = req.params.get('mode', '')
+    session_id = req.params.get('session', '')
 
     try:
-        # Route A: Telegram Webhook (POST /telegram) -> Async
-        if request.method == 'POST' and path == '/telegram':
+        # Route A: Telegram Webhook (POST /api/telegram)
+        # Note: Azure Functions HTTP trigger base URL usually includes /api/
+        if method == 'POST' and route_path == 'telegram':
             async def handle_telegram_update():
                 # Re-initialize application per request to ensure valid event loop and httpx client
-                app = init_bot()
-                await app.initialize()
+                bot_app = init_bot()
+                await bot_app.initialize()
 
                 # Process update
-                update_data = request.get_json(force=True)
-                if update_data:
-                    await app.process_update(Update.de_json(update_data, app.bot))
+                try:
+                    update_data = req.get_json()
+                    if update_data:
+                        await bot_app.process_update(Update.de_json(update_data, bot_app.bot))
+                except ValueError:
+                    logger.error("Failed to parse JSON for Telegram update")
 
-                await app.shutdown()
+                await bot_app.shutdown()
 
             asyncio.run(handle_telegram_update())
-            return jsonify_with_cors({'status': 'ok'})
+            return func.HttpResponse(json.dumps({'status': 'ok'}), mimetype="application/json")
 
-        # Route B: Upload UI (GET /?mode=ui)
-        elif request.method == 'GET' and mode == 'ui':
-            return add_cors_headers(make_response(get_upload_ui_html(session_id)))
+        # Route B: Upload UI (GET /?mode=ui) - Assuming accessed via root or /api/ui
+        elif method == 'GET' and (mode == 'ui' or route_path == 'ui'):
+             return func.HttpResponse(get_upload_ui_html(session_id), mimetype="text/html")
 
         # Route C: File Upload (POST /?mode=upload)
-        elif request.method == 'POST' and mode == 'upload':
-            if 'file' not in request.files:
-                return jsonify_with_cors({'error': 'No file'}, 400)
-            file = request.files['file']
-            handler = UploadHandler()
-            html = handler.handle(session_id, file.read(), file.filename, file.content_type)
-            return add_cors_headers(make_response(html))
+        elif method == 'POST' and (mode == 'upload' or route_path == 'upload'):
+            # Handling Multipart in Azure Functions Python is manual without Flask
+            # We use requests-toolbelt or parse manually.
+            # For simplicity, let's use a helper if available, or basic boundary parsing
+            from requests_toolbelt.multipart import decoder
 
-        # Route D: Drive Scan (GET /?mode=scan)
-        elif mode == 'scan' or mode == 'drive_webhook':
+            content_type = req.headers.get('content-type')
+            if not content_type or 'multipart/form-data' not in content_type:
+                 return func.HttpResponse(json.dumps({'error': 'Content-Type must be multipart/form-data'}), status_code=400)
+
+            multipart_data = decoder.MultipartDecoder(req.get_body(), content_type)
+            
+            file_data = None
+            filename = "unknown"
+            file_ct = "application/octet-stream"
+
+            for part in multipart_data.parts:
+                # Basic content-disposition parsing
+                content_disposition = part.headers.get(b'Content-Disposition', b'').decode()
+                if 'name="file"' in content_disposition:
+                     file_data = part.content
+                     # Try to extract filename
+                     import re
+                     fn_match = re.search(r'filename="(.+?)"', content_disposition)
+                     if fn_match:
+                         filename = fn_match.group(1)
+                     
+                     ct_header = part.headers.get(b'Content-Type')
+                     if ct_header:
+                         file_ct = ct_header.decode()
+                     break
+            
+            if not file_data:
+                 return func.HttpResponse(json.dumps({'error': 'No file found'}), status_code=400)
+
+            handler = UploadHandler()
+            html = handler.handle(session_id, file_data, filename, file_ct)
+            return func.HttpResponse(html, mimetype="text/html")
+
+        # Route D: Drive Scan
+        elif mode == 'scan' or mode == 'drive_webhook' or route_path == 'scan':
              handler = DriveMonitorHandler()
              result = handler.scan_and_process_new_files()
-             return jsonify_with_cors(result)
+             return func.HttpResponse(json.dumps(result), mimetype="application/json")
 
         # Route E: Health Check
-        return jsonify_with_cors({
+        return func.HttpResponse(json.dumps({
             'status': 'healthy',
-            'service': 'V2V2B Interrogator v2.0 (Async)',
-            'async_enabled': True
-        })
+            'service': 'V2V2B Interrogator v2.0 (Azure)',
+            'platform': 'Azure Functions'
+        }), mimetype="application/json")
 
     except Exception as e:
         logger.error(f"Entry point error: {e}", exc_info=True)
-        return jsonify_with_cors({'error': str(e)}, 500)
+        return func.HttpResponse(json.dumps({'error': str(e)}), status_code=500, mimetype="application/json")

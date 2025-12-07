@@ -20,6 +20,11 @@ on:
 env:
   TF_WORKING_DIR: opentofu
   OPENTOFU_VERSION: '1.10.0'
+  # Azure Environment Variables
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_USE_OIDC: true
 
 permissions:
   contents: write
@@ -51,11 +56,12 @@ jobs:
           tofu_version: ${{ env.OPENTOFU_VERSION }}
           tofu_wrapper: false
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - name: Azure Login
+        uses: azure/login@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: OpenTofu Format Check
         id: fmt
@@ -74,8 +80,10 @@ jobs:
         run: |
           echo "🚀 Initializing OpenTofu..."
           tofu init \
-            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
-            -backend-config="prefix=opentofu/state/plan" \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP_NAME }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT_NAME }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=plan.terraform.tfstate" \
             -input=false
 
       - name: OpenTofu Validate
@@ -89,24 +97,19 @@ jobs:
         id: plan
         working-directory: ${{ env.TF_WORKING_DIR }}
         env:
-          TF_VAR_gcp_project: ${{ secrets.GCP_PROJECT_ID || 'gen-lang-client-0805519538' }}
+          TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TF_VAR_github_tokens: '{"maestro":"${{ secrets.GH_TOKEN_MAESTRO }}","beyond":"${{ secrets.GH_TOKEN_BEYOND }}"}'
           TF_VAR_google_drive_folder_id: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '' }}
           TF_VAR_obsidian_drive_folder_id: ${{ vars.OBSIDIAN_DRIVE_FOLDER_ID || '' }}
           TF_VAR_kanban_folder_id: ${{ vars.KANBAN_FOLDER_ID || '' }}
           TF_VAR_drive_poll_interval: ${{ vars.DRIVE_POLL_INTERVAL || '300' }}
-          TF_VAR_function_url: ${{ vars.FUNCTION_URL || '' }}
           TF_VAR_repos_config_file: 'repos.json'
+          TF_VAR_environment: 'plan'
         run: |
           echo "📋 Generating OpenTofu plan..."
-          # Note: PR pipeline runs a speculative plan without specific environment tfvars
-          # to check for general errors, or defaults if available.
-          # Ideally, this should target an environment or use a mock tfvars.
-          # For now, providing required variables via env vars is a minimum.
           tofu plan -no-color -input=false -out=tfplan.binary 2>&1 | tee plan_output.txt
 
-          # Capture exit code
           EXIT_CODE=${PIPESTATUS[0]}
 
           if [ $EXIT_CODE -eq 0 ]; then
@@ -116,7 +119,6 @@ jobs:
             exit $EXIT_CODE
           fi
 
-          # Generate human-readable plan
           tofu show -no-color tfplan.binary > plan_readable.txt
         continue-on-error: false
 
@@ -125,17 +127,12 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           echo "🔒 Running security scan with tfsec..."
-          # Install tfsec
           curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
-
-          # Run tfsec and capture output
           tfsec . --format=markdown > tfsec_output.md || true
 
           if [ -s tfsec_output.md ]; then
-            echo "⚠️ Security findings detected"
             echo "has_findings=true" >> $GITHUB_OUTPUT
           else
-            echo "✅ No security issues found"
             echo "has_findings=false" >> $GITHUB_OUTPUT
           fi
         continue-on-error: true
@@ -145,22 +142,15 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           echo "📖 Reading plan output..."
-
-          # Read the plan output
           if [ -f plan_readable.txt ]; then
             PLAN_CONTENT=$(cat plan_readable.txt)
           else
             PLAN_CONTENT=$(cat plan_output.txt)
           fi
-
-          # Save to file for later use
           echo "$PLAN_CONTENT" > /tmp/plan_content.txt
-
-          # Truncate if too long for GitHub (max 65536 chars for PR body)
           if [ ${#PLAN_CONTENT} -gt 60000 ]; then
-            echo "⚠️ Plan output is very large, truncating for PR"
-            echo "${PLAN_CONTENT:0:60000}" > /tmp/plan_content.txt
-            echo "... [Output truncated due to size]" >> /tmp/plan_content.txt
+             echo "${PLAN_CONTENT:0:60000}" > /tmp/plan_content.txt
+             echo "... [Output truncated]" >> /tmp/plan_content.txt
           fi
 
       - name: Read Security Findings
@@ -168,7 +158,6 @@ jobs:
         if: steps.tfsec.outputs.has_findings == 'true'
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          echo "📖 Reading security findings..."
           if [ -f tfsec_output.md ]; then
             cat tfsec_output.md > /tmp/security_findings.txt
           fi
@@ -179,12 +168,7 @@ jobs:
           github-token: ${{ secrets.GH_TOKEN_MAESTRO || secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const path = require('path');
-
-            // Read plan output
             const planText = fs.readFileSync('/tmp/plan_content.txt', 'utf8');
-
-            // Read security findings if they exist
             let securitySection = '';
             try {
               const securityFindings = fs.readFileSync('/tmp/security_findings.txt', 'utf8');
@@ -193,57 +177,23 @@ jobs:
               securitySection = '\n\n## Security Scan\n\nNo security issues detected by tfsec.\n';
             }
 
-            // Get branch information
             const branchName = context.ref.replace('refs/heads/', '');
             const targetBranch = '${{ inputs.target_branch }}' || 'main';
 
-            // Don't create PR if we're already on main/master
             if (branchName === 'main' || branchName === 'master') {
-              console.log('Already on main/master branch, skipping PR creation');
+              console.log('Already on main/master branch, skipping PR');
               return;
             }
 
-            const title = `[Maestro GitOps] Infrastructure Update Proposal from ${branchName}`;
-
+            const title = `[Maestro GitOps] Infrastructure Update Proposal from ${branchName} (Azure)`;
             const body = `## Maestro Proposed Execution Plan (Awaiting HITL Review)\n\n` +
               `This Pull Request contains an infrastructure change proposed by the **Maestro AI Agent**.\n\n` +
-              `### Human-in-the-Loop (HITL) Governance Gate\n` +
-              `The **HITL governance gate** is enforced by requiring:\n` +
-              `- Mandatory team review and approval\n` +
-              `- Policy-as-Code validation (Phase 2, future enhancement)\n` +
-              `- Security scanning and compliance checks\n\n` +
-                `**IMPORTANT:** This PR contains an OpenTofu plan only. No infrastructure changes have been applied yet.\n\n` +
-              `### Review Checklist\n` +
-              `- [ ] Verify that the proposed changes align with the intended modifications\n` +
-              `- [ ] Check for unexpected resource deletions or modifications\n` +
-              `- [ ] Validate security scan results\n` +
-              `- [ ] Ensure compliance with organizational policies\n` +
-              `- [ ] Confirm cost implications are acceptable\n` +
-              securitySection + `\n` +
-                `### OpenTofu Plan Output\n\n` +
-              `<details>\n` +
-                `<summary>Click to expand full OpenTofu plan</summary>\n\n` +
+              `<details><summary>Click to expand full OpenTofu plan</summary>\n\n` +
               `\`\`\`hcl\n${planText}\n\`\`\`\n\n` +
-              `</details>\n\n` +
-              `---\n\n` +
-              `### Workflow Information\n` +
-              `- **Triggered by:** ${context.actor}\n` +
-              `- **Source Branch:** ${branchName}\n` +
-              `- **Target Branch:** ${targetBranch}\n` +
-              `- **Workflow Run:** [View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n` +
-              `- **Commit:** ${context.sha}\n\n` +
-              `### Next Steps\n` +
-              `1. Review the Terraform plan above\n` +
-              `2. Approve this PR if changes are correct\n` +
-              `3. Merge this PR to trigger the deployment workflow (Phase 2)\n` +
-              `4. Monitor the deployment for any issues\n\n` +
-              `---\n` +
-              `*This PR was automatically generated by Maestro GitOps Workflow*\n` +
-              `*Artifact Contract Version: 1.0*\n` +
-              `*Working Directory: \`terraform/\`*`;
+              `</details>\n` +
+              securitySection;
 
             try {
-              // Check if PR already exists
               const { data: existingPRs } = await github.rest.pulls.list({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -253,95 +203,22 @@ jobs:
               });
 
               if (existingPRs.length > 0) {
-                // Update existing PR
-                const prNumber = existingPRs[0].number;
-                console.log(`♻️ Updating existing PR #${prNumber}`);
-
-                await github.rest.pulls.update({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                  title: title,
-                  body: body
-                });
-
-                // Add comment about update
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: prNumber,
-                    body: `🔄 **OpenTofu plan updated**\n\nThe infrastructure plan has been regenerated. Please review the updated changes above.\n\n*Updated at: ${new Date().toISOString()}*`
-                });
-
-                console.log(`✅ PR #${prNumber} updated successfully`);
-                console.log(`🔗 ${existingPRs[0].html_url}`);
+                 await github.rest.issues.createComment({
+                   owner: context.repo.owner,
+                   repo: context.repo.repo,
+                   issue_number: existingPRs[0].number,
+                   body: `🔄 **OpenTofu plan updated**\n\nInfrastructure plan regenerated for Azure migration.`
+                 });
               } else {
-                // Create new PR
-                console.log(`📝 Creating new PR from ${branchName} to ${targetBranch}`);
-
-                const { data: pull } = await github.rest.pulls.create({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  title: title,
-                  head: branchName,
-                  base: targetBranch,
-                  body: body
-                });
-
-                console.log(`✅ Pull Request created successfully!`);
-                console.log(`🔗 ${pull.html_url}`);
-
-                // Add labels to PR
-                try {
-                  await github.rest.issues.addLabels({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: pull.number,
-                    labels: ['maestro-gitops', 'terraform', 'infrastructure', 'awaiting-review']
-                  });
-                } catch (labelError) {
-                  console.log('⚠️ Could not add labels (labels may not exist)');
-                }
+                 await github.rest.pulls.create({
+                   owner: context.repo.owner,
+                   repo: context.repo.repo,
+                   title: title,
+                   head: branchName,
+                   base: targetBranch,
+                   body: body
+                 });
               }
             } catch (error) {
-              console.error('❌ Error creating/updating PR:', error.message);
-
-              if (error.message.includes('No commits between')) {
-                console.log('ℹ️ No changes detected between branches');
-              } else if (error.message.includes('A pull request already exists')) {
-                console.log('ℹ️ PR already exists, attempting to update...');
-              } else if (error.message.includes('GitHub Actions is not permitted to create or approve pull requests')) {
-                console.error('🚫 PERMISSION ERROR: This repository does not allow GitHub Actions to create PRs.');
-                console.error('👉 Please go to Settings > Actions > General > Workflow permissions and check "Allow GitHub Actions to create and approve pull requests".');
-                throw error;
-              } else {
-                throw error;
-              }
+              console.error('Error creating/updating PR:', error.message);
             }
-
-      - name: Generate Job Summary
-        if: always()
-        run: |
-          echo "## 📋 OpenTofu Plan Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | Step | Result |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| ${{ steps.fmt.outcome == 'success' && '✅' || '⚠️' }} | Format Check | ${{ steps.fmt.outcome }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ${{ steps.init.outcome == 'success' && '✅' || '❌' }} | Init | ${{ steps.init.outcome }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ${{ steps.validate.outcome == 'success' && '✅' || '❌' }} | Validate | ${{ steps.validate.outcome }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ${{ steps.plan.outcome == 'success' && '✅' || '❌' }} | Plan | ${{ steps.plan.outcome }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ${{ steps.tfsec.outcome == 'success' && '✅' || '⚠️' }} | Security Scan | ${{ steps.tfsec.outcome }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📊 Workflow Details" >> $GITHUB_STEP_SUMMARY
-          echo "- **Working Directory**: \`${{ env.TF_WORKING_DIR }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **OpenTofu Version**: ${{ env.OPENTOFU_VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ⚠️ Important Notes" >> $GITHUB_STEP_SUMMARY
-          echo "- **No infrastructure changes have been applied**" >> $GITHUB_STEP_SUMMARY
-          echo "- This workflow only generates a plan and creates a PR" >> $GITHUB_STEP_SUMMARY
-          echo "- Deployment requires manual PR approval and merge" >> $GITHUB_STEP_SUMMARY
-          echo "- All changes must pass HITL governance gates" >> $GITHUB_STEP_SUMMARY
-# Trigger workflow with latest fixes

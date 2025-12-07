@@ -1,0 +1,11 @@
+__pycache__
+.python_version
+.git
+.github
+*.sh
+tests/
+test_*.py
+.venv
+.vscode
+local_settings.json
+opentofu/

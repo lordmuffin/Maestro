@@ -1,87 +1,27 @@
-# V2V2B Interrogator - Terraform Variables
+# V2V2B Interrogator - Azure Terraform Variables
 # Copy this file to terraform.tfvars and update with your values
 
-# ========================================
-# Required Variables
-# ========================================
+# Azure Configuration
+azure_subscription_id = "your-subscription-id"
+location              = "eastus"
+environment           = "staging"
 
-# GCP Project Configuration
-gcp_project = "your-project-id"
-region      = "us-central1"
-
-# GitHub Integration (Required)
-# Map of repository labels to GitHub tokens
-# Labels must match those defined in repos.json
+# GitHub Integration
 github_tokens = {
-  maestro = "ghp_your_maestro_token_here"  # Get from: https://github.com/settings/tokens
-  beyond  = "ghp_your_beyond_token_here"   # Can be same token as maestro
+  maestro = "ghp_your_maestro_token"
+  beyond  = "ghp_your_beyond_token"
 }
 
-# Repository configuration file (relative to terraform directory)
-repos_config_file = "repos.json"
+# Bot Configuration
+telegram_bot_token = "your-bot-token"
 
-# Repository name for 'Beyond' project
-beyond_repo_name = "lordmuffin/beyond"
+# Optional: Naming overrides
+# resource_group_name  = "my-rg"
+# function_name        = "my-function"
+# storage_account_name = "mystorage"
+# cosmos_db_name       = "mycosmos"
 
-# Comma-separated list of users/IDs whitelisted for logs
-logs_whitelist = ""
-
-# ========================================
-# Google Drive Integration (Optional)
-# ========================================
-
-# Google Drive folder ID to monitor for transcripts (.txt, .m4a files)
-# Get from URL: https://drive.google.com/drive/folders/FOLDER_ID
-google_drive_folder_id = ""  # e.g., "1abc123def456ghi789"
-
-# Google Drive folder ID for Obsidian vault (where summaries are synced)
-obsidian_drive_folder_id = ""  # e.g., "1xyz987uvw654rst321"
-
-# Polling interval in seconds (default: 300 = 5 minutes)
-drive_poll_interval = 300
-
-# ========================================
-# Function Configuration
-# ========================================
-
-function_name = "v2v2b-interrogator"
-
-# Function URL (leave empty for first deployment)
-# After first deployment, run: terraform output -raw function_url
-# Then update this value and re-apply
-function_url = ""
-
-# ========================================
-# Resource Configuration
-# ========================================
-
-memory             = "512Mi"  # Options: 256Mi, 512Mi, 1Gi, 2Gi, 4Gi, 8Gi
-timeout_seconds    = 540      # Maximum: 3600 (1 hour)
-max_instance_count = 10       # Maximum concurrent instances
-min_instance_count = 0        # 0 = scale to zero when idle
-
-# Firestore Rules
-deploy_firestore_rules = true
-
-# Resource Labels
-labels = {
-  application = "v2v2b-interrogator"
-  managed-by  = "terraform"
-  environment = "production"
-}
-
-# ========================================
-# Example Configurations
-# ========================================
-
-# Cost-Optimized (Minimal):
-# memory             = "256Mi"
-# timeout_seconds    = 300
-# max_instance_count = 5
-# min_instance_count = 0
-
-# High-Performance:
-# memory             = "2Gi"
-# timeout_seconds    = 900
-# max_instance_count = 100
-# min_instance_count = 5
+# Drive Integration (Folder IDs)
+google_drive_folder_id   = ""
+obsidian_drive_folder_id = ""
+kanban_folder_id         = ""
