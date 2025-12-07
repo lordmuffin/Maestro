@@ -85,8 +85,8 @@ data "archive_file" "function_source" {
   output_path = "${path.module}/.terraform/function-source.zip"
 
   source {
-    content  = file("${path.module}/../V2V2B/main.py")
-    filename = "main.py"
+    content  = file("${path.module}/../V2V2B/function_app.py")
+    filename = "function_app.py"
   }
   source {
     content  = file("${path.module}/../V2V2B/requirements.txt")
