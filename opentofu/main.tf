@@ -28,25 +28,25 @@ provider "azurerm" {
 
 # Random string for unique naming if needed
 resource "random_string" "unique_id" {
-  length  = 6
+  length  = 8
   special = false
   upper   = false
 }
 
 locals {
   # Generate names if not provided
-  rg_name     = var.resource_group_name != "" ? var.resource_group_name : "rg-${var.function_name}-${var.environment}"
+  rg_name     = var.resource_group_name != "" ? var.resource_group_name : "rg-${var.function_name}-${var.environment}-${random_string.unique_id.result}"
   
   # Storage Account name must be max 24 chars, lowercase, alphanumeric.
-  # We take the function name (stripped of hyphens), truncate to 15 chars, and append 6 random chars. 21 chars max.
+  # We take the function name (stripped of hyphens), truncate to 15 chars, and append 8 random chars. 23 chars max.
   sa_name_base = substr(replace(var.function_name, "-", ""), 0, 15)
   sa_name      = var.storage_account_name != "" ? var.storage_account_name : "st${local.sa_name_base}${random_string.unique_id.result}"
 
   # Cosmos DB name must be max 44 chars.
   # We construct a base name and ensure it fits.
-  # "cosmos-" (7) + func_name (truncated) + "-" + env + "-" + random (6)
+  # "cosmos-" (7) + func_name (truncated) + "-" + env + "-" + random (8)
   # Limit base func name to ensure fit.
-  cosmos_name = var.cosmos_db_name != "" ? var.cosmos_db_name : "cosmos-${substr(var.function_name, 0, 20)}-${var.environment}-${random_string.unique_id.result}"
+  cosmos_name = var.cosmos_db_name != "" ? var.cosmos_db_name : "cosmos-${substr(var.function_name, 0, 18)}-${var.environment}-${random_string.unique_id.result}"
 
   # Function App name needs to be globally unique
   func_app_name = "${var.function_name}-${var.environment}-${random_string.unique_id.result}"
@@ -74,7 +74,7 @@ resource "azurerm_storage_account" "sa" {
 
 # Application Insights (for monitoring)
 resource "azurerm_application_insights" "app_insights" {
-  name                = "api-${var.function_name}-${var.environment}"
+  name                = "api-${var.function_name}-${var.environment}-${random_string.unique_id.result}"
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
   application_type    = "web"
@@ -82,7 +82,7 @@ resource "azurerm_application_insights" "app_insights" {
 
 # App Service Plan (Consumption)
 resource "azurerm_service_plan" "asp" {
-  name                = "asp-${var.function_name}-${var.environment}"
+  name                = "asp-${var.function_name}-${var.environment}-${random_string.unique_id.result}"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
   os_type             = "Linux"
