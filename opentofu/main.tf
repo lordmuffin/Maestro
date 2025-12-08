@@ -38,8 +38,8 @@ locals {
   rg_name     = var.resource_group_name != "" ? var.resource_group_name : "rg-${var.function_name}-${var.environment}-${random_string.unique_id.result}"
   
   # Storage Account name must be max 24 chars, lowercase, alphanumeric.
-  # We take the function name (stripped of hyphens), truncate to 15 chars, and append 8 random chars. 23 chars max.
-  sa_name_base = substr(replace(var.function_name, "-", ""), 0, 15)
+  # We take the function name (stripped of hyphens), truncate to 14 chars, and append 8 random chars. 24 chars max.
+  sa_name_base = substr(replace(var.function_name, "-", ""), 0, 14)
   sa_name      = var.storage_account_name != "" ? var.storage_account_name : "st${local.sa_name_base}${random_string.unique_id.result}"
 
   # Cosmos DB name must be max 44 chars.
@@ -209,7 +209,7 @@ resource "azurerm_cosmosdb_sql_container" "interactions" {
   resource_group_name = azurerm_resource_group.rg.name
   account_name        = azurerm_cosmosdb_account.db_account.name
   database_name       = azurerm_cosmosdb_sql_database.db.name
-  partition_key_path  = "/chat_id"
+  partition_key_paths = ["/chat_id"]
 }
 
 
